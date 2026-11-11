@@ -1,6 +1,9 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
 
+/* The prototype components still use utility classes; C2 moves them to the library's plain CSS. */
+@source "../../../../src";
+
 @theme static {
     --font-sans: 'Inter', sans-serif;
 }

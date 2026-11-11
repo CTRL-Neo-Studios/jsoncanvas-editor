@@ -1,28 +1,19 @@
-import {defineNuxtModule, addPlugin, createResolver} from '@nuxt/kit'
-import {addComponentsDir, addImportsDir} from '@nuxt/kit'
+import { addComponent, createResolver, defineNuxtModule } from '@nuxt/kit'
 
-// Module options TypeScript interface definition
-export interface ModuleOptions {
-}
-
-export default defineNuxtModule<ModuleOptions>({
+/** Registers `<JsonCanvasEditor>` and its stylesheet. The host must also install `@nuxt/ui`. */
+export default defineNuxtModule({
 	meta: {
 		name: '@type32/jsoncanvas-editor-nuxt',
 		configKey: 'jsonCanvasEditor',
 	},
-	// Default configuration options of the Nuxt module
-	defaults: {},
-	setup(_options, _nuxt) {
-		const resolver = createResolver(import.meta.url)
+	setup(_options, nuxt) {
+		const { resolve } = createResolver(import.meta.url)
 
-		addPlugin(resolver.resolve('./runtime/plugin'))
-		_nuxt.options.css.unshift(resolver.resolve('./runtime/styles/main.css'))
-
-		// Auto-import components and composables
-		addComponentsDir({
-			path: resolver.resolve('./runtime/components'),
-			pathPrefix: false,
+		// First, so the host's own CSS overrides it.
+		nuxt.options.css.unshift(resolve('./runtime/style.css'))
+		addComponent({
+			name: 'JsonCanvasEditor',
+			filePath: resolve('./runtime/vue/components/JsonCanvasEditor.vue'),
 		})
-		addImportsDir(resolver.resolve('./runtime/composables'))
 	},
 })

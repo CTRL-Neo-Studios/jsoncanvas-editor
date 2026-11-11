@@ -4,7 +4,7 @@ import { useJsonCanvasEditor } from '../composables/useJsonCanvasEditor'
 import { useNodeDragAndSelect } from '../composables/useNodeDragAndSelect'
 import { useNodeHierarchy } from '../composables/useNodeHierarchy'
 import { useNodeResize } from '../composables/useNodeResize'
-import type { JSONCanvas } from '../types/jsoncanvas'
+import type { JSONCanvas } from '../../core/types'
 import NodeRenderer from './NodeRenderer.vue'
 
 const props = withDefaults(defineProps<{
@@ -40,7 +40,6 @@ const {
   onPointerMove,
   onPointerUp,
   onWheel,
-  screenToWorld,
 } = useJsonCanvasEditor({ 
   minScale: 0.25, 
   maxScale: 5,
@@ -89,7 +88,7 @@ function handleNodeInteractionStart(event: PointerEvent, nodeId: string) {
   const node = props.modelValue.nodes?.find(n => n.id === nodeId)
   if (!node) return
   
-  const handle = getHandleForMouseEvent(event, node)
+  const handle = getHandleForMouseEvent(event)
 
   if (handle) {
     startResize(event, nodeId, handle)
@@ -132,7 +131,7 @@ watch(isPanning, (panning) => {
 <template>
   <div
     ref="viewportRef"
-    class="relative w-full h-dvh overflow-hidden select-none font-canvas"
+    class="jc-canvas relative w-full h-dvh overflow-hidden select-none"
     :style="cssVars as any"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"

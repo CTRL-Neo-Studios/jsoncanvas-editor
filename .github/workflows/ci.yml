@@ -4,46 +4,35 @@ on:
   push:
     branches:
       - main
+      - dev
   pull_request:
     branches:
       - main
+      - dev
 
 jobs:
-  lint:
+  ci:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 20
-
-      - run: npm i -g --force corepack@latest && corepack enable
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npx nypm@latest i
+        run: bun install --frozen-lockfile
+
+      - name: Prepare
+        run: bun run dev:prepare
 
       - name: Lint
-        run: npm run lint
-
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 20
-
-      - run: npm i -g --force corepack@latest && corepack enable
-
-      - name: Install dependencies
-        run: npx nypm@latest i
-
-      - name: Playground prepare
-        run: npm run dev:prepare
+        run: bun run lint
 
       - name: Test
-        run: npm run test
+        run: bun run test
+
+      - name: Typecheck
+        run: bun run test:types
+
+      - name: Build
+        run: bun run prepack

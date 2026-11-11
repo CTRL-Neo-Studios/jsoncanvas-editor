@@ -1,5 +1,5 @@
-import { ref, type Ref } from 'vue'
-import type { JSONCanvas, JSONCanvasNode } from '../types/jsoncanvas'
+import type { Ref } from 'vue'
+import type { JSONCanvas, JSONCanvasNode } from '../../core/types'
 
 type Point = { x: number; y: number }
 export type HandlePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top' | 'bottom' | 'left' | 'right' | null
@@ -20,7 +20,7 @@ export function useNodeResize(
   let isResizing = false
   let frameId: number | null = null
 
-  function getHandleForMouseEvent(event: PointerEvent, node: JSONCanvasNode): HandlePosition {
+  function getHandleForMouseEvent(event: PointerEvent): HandlePosition {
     const target = event.target as HTMLElement
     const rect = target.getBoundingClientRect()
     

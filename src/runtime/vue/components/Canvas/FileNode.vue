@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { JSONCanvasFileNode } from '../../types/jsoncanvas'
+import UIcon from '@nuxt/ui/components/Icon.vue'
+import type { JSONCanvasFileNode } from '../../../core/types'
 
 defineProps<{
   node: JSONCanvasFileNode

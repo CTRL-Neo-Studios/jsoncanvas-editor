@@ -30,30 +30,44 @@ bun add @type32/jsoncanvas-editor-nuxt
 
 That's it! You can now use JSON Canvas Editor in your Nuxt app ✨
 
-### Usage
+> [!WARNING]
+> Early rewrite towards Obsidian Canvas parity: see the [plan](https://github.com/CTRL-Neo-Studios/vertex/blob/dev/plans/Canvas%20Plan.md). The API below will change.
 
-Add the module to your `nuxt.config.ts` and drop the `JsonCanvasEditor` anywhere:
+### Usage (Nuxt)
+
+Add `@nuxt/ui` and this module to `nuxt.config.ts`; `<JsonCanvasEditor>` is registered globally:
 
 ```vue
 <template>
   <div class="h-dvh">
     <JsonCanvasEditor v-model="canvas" />
   </div>
- </template>
+</template>
 
 <script setup lang="ts">
-import type { JSONCanvas } from '@type32/jsoncanvas-editor-nuxt'
-const canvas = ref<JSONCanvas>({ nodes: [], edges: [], metadata: { version: '1.0', frontmatter: {} } })
+import type { JSONCanvas } from '@type32/jsoncanvas-editor-nuxt/core'
+const canvas = ref<JSONCanvas>({ nodes: [], edges: [] })
 </script>
 ```
 
-The editor supports:
+### Usage (Vue + Vite)
 
-- Pan/zoom with mouse and trackpad
-- Add Text/File/Link/Group nodes
-- Drag to move, resize via handle (snap to grid)
-- Draw edges with arrowheads; delete with keyboard
-- Import/export JSON via your own controls (or via exposed methods)
+Set up [Nuxt UI for Vue](https://ui.nuxt.com/docs/getting-started/installation/vue), then:
+
+```ts
+import { JsonCanvasEditor } from '@type32/jsoncanvas-editor-nuxt/vue'
+import '@type32/jsoncanvas-editor-nuxt/style.css'
+```
+
+Entry points: `@type32/jsoncanvas-editor-nuxt/core` (types, no Vue), `/vue` (components), `/style.css`.
+
+Until the components move to the library's plain CSS, add the package to Tailwind's sources in your main CSS: `@source "../node_modules/@type32/jsoncanvas-editor-nuxt/dist";` (path relative to that file).
+
+The editor currently supports:
+
+- Pan (wheel, middle mouse, Space+drag) and zoom (Ctrl/Cmd+wheel)
+- Rendering text/file/link/group nodes (no edges yet)
+- Box and Shift/Cmd selection; drag to move (group contents move with the group); resize from the edges; optional grid snap
 
 Inspiration and reference implementations for rendering-only solutions:
 

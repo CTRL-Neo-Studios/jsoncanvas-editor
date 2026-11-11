@@ -1,5 +1,5 @@
-import { ref, type Ref } from 'vue'
-import type { JSONCanvas, Point } from '../types/jsoncanvas'
+import type { Ref } from 'vue'
+import type { JSONCanvas, Point } from '../../core/types'
 
 type Hierarchy = {
   getDescendants: (nodeId: string) => Set<string>
@@ -14,7 +14,7 @@ export function useNodeDragAndSelect(
   gridSpacing: Ref<number>,
   updateCanvas: (newCanvas: JSONCanvas) => void,
 ) {
-  let dragStartPositions: Map<string, Point> = new Map()
+  const dragStartPositions: Map<string, Point> = new Map()
   let dragStartPointer: Point | null = null
   let isDragging = false
   let frameId: number | null = null

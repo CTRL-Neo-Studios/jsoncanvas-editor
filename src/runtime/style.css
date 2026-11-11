@@ -1,0 +1,4 @@
+/* Plain CSS, no Tailwind: hosts don't scan node_modules for utility classes. */
+.jc-canvas {
+	font-family: var(--jc-font, inherit);
+}

@@ -1,6 +1,6 @@
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useMagicKeys } from '@vueuse/core'
-import type { Rect, Point } from '../types/jsoncanvas'
+import type { Rect, Point } from '../../core/types'
 
 export interface UseJsonCanvasEditorOptions {
   minScale?: number

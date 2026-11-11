@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { JSONCanvasNode } from '../types/jsoncanvas'
+import type { JSONCanvasNode } from '../../core/types'
 import TextNode from './Canvas/TextNode.vue'
 import FileNode from './Canvas/FileNode.vue'
 import LinkNode from './Canvas/LinkNode.vue'

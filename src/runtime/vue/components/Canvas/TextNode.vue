@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { JSONCanvasTextNode } from '../../types/jsoncanvas'
+import type { JSONCanvasTextNode } from '../../../core/types'
 
 defineProps<{
   node: JSONCanvasTextNode

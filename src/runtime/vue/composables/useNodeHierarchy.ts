@@ -1,5 +1,5 @@
 import { computed, type Ref } from 'vue'
-import type { JSONCanvasNode } from '../types/jsoncanvas'
+import type { JSONCanvasNode } from '../../core/types'
 
 export function useNodeHierarchy(nodes: Ref<JSONCanvasNode[]>) {
   const nodeHierarchy = computed(() => {

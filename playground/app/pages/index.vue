@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { JSONCanvas } from '@type32/jsoncanvas-editor-nuxt'
+import type { JSONCanvas } from '@type32/jsoncanvas-editor-nuxt/core'
 
 const canvas = ref<JSONCanvas>({
   nodes: [
