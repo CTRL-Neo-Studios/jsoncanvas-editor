@@ -1,8 +1,9 @@
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, type ComputedRef, type Ref } from 'vue'
 import {
-	alignRects, arrangeRects, distributeRects, fileKind, gridSpacing, GROUP_PADDING, growBBox, justifyRects, newId,
-	NODE_SIZE, orderNodes, pointBox, PRESET_COLORS, rectOf, removeFromCanvas, setBackground, unionBBox,
+	alignRects, arrangeRects, CANVAS_CLIP_TYPE, copyClip, distributeRects, fileKind, gridSpacing, GROUP_PADDING, growBBox,
+	justifyRects, newId, NODE_SIZE, orderNodes, pasteClip, pointBox, PRESET_COLORS, readClip, rectOf, removeFromCanvas,
+	setBackground, unionBBox,
 	type AlignMode, type ArrangeMode, type Axis, type BBox, type CanvasEnd, type FileKind, type JSONCanvasEdge,
 	type JSONCanvasGroupNode, type Point, type Rect,
 } from '../../core'
@@ -93,9 +94,23 @@ export interface CanvasActions {
 	createWithSize: (box: BBox) => DropdownMenuItem[] | undefined
 	/** A context menu's items for `target`, after the host's additions. */
 	menu: (target: MenuTarget) => DropdownMenuItem[][]
+	/** Puts the selected nodes and the edges among them in `data` (a copy event's clipboard); false with no node selected. */
+	copy: (data: DataTransfer) => boolean
+	/** `copy`, then removes the selection. */
+	cut: (data: DataTransfer) => boolean
+	/**
+	 * Adds what `data` (a paste or a drop) holds, centred on `at` (the view's centre by default): the host's files
+	 * (`host.filesIn`), files (`host.importFiles`), cards copied from a canvas, a web page for a URL, else a text card.
+	 * False when it holds none of these.
+	 */
+	paste: (data: DataTransfer, at?: Point) => boolean
 }
 
 const YOUTUBE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//
+const WEB_URL = /^https?:\/\/\S+$/i
+/** Pasted files are laid out in rows of this many cards, this far apart. */
+const PASTE_COLUMNS = 10
+const PASTE_GAP = 45
 const KINDS: Record<'file' | 'media', FileKind[]> = { file: ['markdown', 'canvas'], media: ['image', 'video', 'audio', 'pdf'] }
 const SIZES: Record<NewCardKind, { width: number, height: number }> = {
 	card: NODE_SIZE.text,
@@ -130,6 +145,10 @@ const boxOf = (p: Placement, size: { width: number, height: number }): BBox => {
 	return { minX: x, minY: y, maxX: x + size.width, maxY: y + size.height }
 }
 
+/** A box of `size` centred on `p`, in whole units. */
+const rectAt = (p: Point, size: { width: number, height: number }) =>
+	({ x: Math.round(p.x - size.width / 2), y: Math.round(p.y - size.height / 2), ...size })
+
 export function useCanvasActions(editor: CanvasEditor, interaction: CanvasInteraction, o: ActionsOptions): CanvasActions {
 	const { scene, viewport } = editor
 	const t = o.messages
@@ -150,11 +169,11 @@ export function useCanvasActions(editor: CanvasEditor, interaction: CanvasIntera
 		editor.commit({ ...doc, nodes: doc.nodes!.map(n => change.get(n) ?? n) })
 	}
 
-	/** Inserts `node` (groups go behind, as always) and selects it. */
-	function insert(node: Record<string, unknown> & { id: string }) {
+	/** Inserts `nodes` (groups go behind, as always) and selects them. */
+	function insert(...nodes: Array<Record<string, unknown> & { id: string }>) {
 		const doc = editor.canvas.value
-		editor.commit({ ...doc, nodes: orderNodes([...doc.nodes ?? [], node]) })
-		editor.select([node.id])
+		editor.commit({ ...doc, nodes: orderNodes([...doc.nodes ?? [], ...nodes]) })
+		editor.select(nodes.map(n => n.id))
 	}
 
 	const at = (b: BBox) => ({ x: Math.round(b.minX), y: Math.round(b.minY), width: Math.round(b.maxX - b.minX), height: Math.round(b.maxY - b.minY) })
@@ -235,6 +254,61 @@ export function useCanvasActions(editor: CanvasEditor, interaction: CanvasIntera
 		if (readonly()) return
 		editor.commit(removeFromCanvas(editor.canvas.value, new Set(selectedNodes.value.map(n => n.node)), new Set(selectedEdges.value.map(e => e.edge))))
 		editor.select([])
+	}
+
+	function copy(data: DataTransfer) {
+		const clip = copyClip(editor.canvas.value, selectedNodes.value.map(n => n.node))
+		if (!clip) return false
+		const json = JSON.stringify(clip)
+		data.setData(CANVAS_CLIP_TYPE, json)
+		data.setData('text/plain', json)
+		return true
+	}
+
+	/** File cards for `paths`, in rows centred on `at`. */
+	function addFiles(paths: readonly string[], at: Point) {
+		if (!paths.length || readonly()) return
+		const { width, height } = NODE_SIZE.file, dx = width + PASTE_GAP, dy = height + PASTE_GAP
+		const columns = Math.min(paths.length, PASTE_COLUMNS), rows = Math.ceil(paths.length / PASTE_COLUMNS)
+		const left = at.x - (columns * dx - PASTE_GAP) / 2, top = at.y - (rows * dy - PASTE_GAP) / 2
+		insert(...paths.map((file, i) => ({
+			id: newId(), type: 'file', file, width, height,
+			x: Math.round(left + (i % PASTE_COLUMNS) * dx), y: Math.round(top + Math.floor(i / PASTE_COLUMNS) * dy),
+		})))
+	}
+
+	function paste(data: DataTransfer, at: Point = { x: viewport.view.x, y: viewport.view.y }) {
+		if (readonly()) return false
+		const host = o.host()
+		// Everything is read before the first await: the transfer is emptied once its event is over.
+		const own = host?.filesIn?.(data)
+		const files = [...data.files]
+		if (own) {
+			void Promise.resolve(own).then(paths => addFiles(paths, at))
+			return true
+		}
+		if (files.length && host?.importFiles) {
+			void host.importFiles(files).then(paths => addFiles(paths, at))
+			return true
+		}
+		const text = data.getData('text/plain')
+		const clip = readClip(data.getData(CANVAS_CLIP_TYPE)) ?? readClip(text)
+		if (clip) {
+			const { canvas, clones } = pasteClip(editor.canvas.value, clip, at)
+			editor.commit(canvas)
+			editor.select(clones.map(n => String(n.id)))
+			return true
+		}
+		const url = text.trim()
+		if (WEB_URL.test(url) && URL.canParse(url)) {
+			insert({ id: newId(), ...rectAt(at, YOUTUBE.test(url) ? { width: 640, height: 360 } : NODE_SIZE.file), type: 'link', url })
+			return true
+		}
+		if (!text) return false
+		const id = newId()
+		insert({ id, ...rectAt(at, NODE_SIZE.text), type: 'text', text })
+		interaction.startEditing(id)
+		return true
 	}
 
 	function createGroup() {
@@ -475,7 +549,12 @@ export function useCanvasActions(editor: CanvasEditor, interaction: CanvasIntera
 
 	return {
 		selectedNodes, selectedEdges, toolbarItems, toolbarAnchor, currentColor,
-		setColor, removeSelection, createGroup, layout, setLineDirection, add, creationItems, menu,
+		setColor, removeSelection, createGroup, layout, setLineDirection, add, creationItems, menu, copy, paste,
+		cut(data) {
+			if (readonly() || !copy(data)) return false
+			removeSelection()
+			return true
+		},
 		createWithSize(box) {
 			const behavior = o.modDragBehavior()
 			if (behavior === 'menu') return creationItems({ box })

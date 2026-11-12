@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, provide, ref, useId, useTemplateRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, useId, useTemplateRef, watch } from 'vue'
 import { gridSpacing, type JSONCanvas, type Viewport } from '../../core'
 import { useCanvasActions, type CanvasMenuEvent, type CardTemplate, type ModDragBehavior } from '../composables/useCanvasActions'
 import { CANVAS_CONTENT, useCanvasContent, type CanvasSlots } from '../composables/useCanvasContent'
@@ -160,6 +160,33 @@ function onKeyDown(e: KeyboardEvent) {
 	interaction.onKeyDown(e)
 }
 
+// Clipboard events go to the document (to the focused element, or the body, by browser), so they're taken while
+// the canvas itself has focus. Text being edited has the focus, so it copies and pastes as text.
+function onClipboard(e: ClipboardEvent) {
+	if (document.activeElement !== el.value || !e.clipboardData) return
+	const data = e.clipboardData
+	if (e.type === 'copy' ? actions.copy(data) : e.type === 'cut' ? actions.cut(data) : actions.paste(data)) e.preventDefault()
+}
+const CLIPBOARD_EVENTS = ['copy', 'cut', 'paste'] as const
+onMounted(() => CLIPBOARD_EVENTS.forEach(t => document.addEventListener(t, onClipboard)))
+onBeforeUnmount(() => CLIPBOARD_EVENTS.forEach(t => document.removeEventListener(t, onClipboard)))
+
+/** A drop into a text being edited is the text's. */
+const intoText = (e: DragEvent) => !!(e.target as Element).closest('input, textarea, [contenteditable]')
+
+function onDragOver(e: DragEvent) {
+	if (intoText(e)) return
+	// Taken in read-only too, so a dropped file never replaces the page.
+	e.preventDefault()
+	if (e.dataTransfer) e.dataTransfer.dropEffect = readonly.value ? 'none' : 'copy'
+}
+
+function onDrop(e: DragEvent) {
+	if (intoText(e) || !e.dataTransfer) return
+	e.preventDefault()
+	actions.paste(e.dataTransfer, editor.viewport.screenToWorld(e))
+}
+
 defineExpose({
 	/** The document as shown. */
 	canvas: editor.canvas,
@@ -207,6 +234,8 @@ defineExpose({
 		@keydown="onKeyDown"
 		@keyup="editor.viewport.onKeyUp"
 		@blur="spaceHeld = false"
+		@dragover="onDragOver"
+		@drop="onDrop"
 	>
 		<svg class="jc-background">
 			<defs>

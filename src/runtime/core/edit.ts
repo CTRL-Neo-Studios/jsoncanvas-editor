@@ -1,5 +1,5 @@
-import type { BBox, Point } from './geometry'
-import { nodeBox, orderNodes } from './parse'
+import { centerOf, unionBBox, type BBox, type Point } from './geometry'
+import { nodeBox, normalizeCanvas, orderNodes } from './parse'
 import { newId, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasGroupNode, type JSONCanvasNode, type JSONCanvasUnsupportedEdge, type JSONCanvasUnsupportedNode } from './types'
 
 type AnyNode = JSONCanvasNode | JSONCanvasUnsupportedNode
@@ -90,10 +90,10 @@ export function removeFromCanvas(canvas: JSONCanvas, nodes: ReadonlySet<AnyNode>
 }
 
 /**
- * Adds copies of `nodes` (which must have a box) moved by `offset`, with new ids, and copies of the edges between
- * them. Returns the canvas and the copies.
+ * Adds copies of `nodes` (which must have a box) moved by `offset`, with new ids, and copies of the edges among
+ * them from `edges`. Returns the canvas and the copies.
  */
-export function cloneNodes(canvas: JSONCanvas, nodes: readonly AnyNode[], offset: Point): { canvas: JSONCanvas, clones: AnyNode[] } {
+export function cloneNodes(canvas: JSONCanvas, nodes: readonly AnyNode[], offset: Point, edges: readonly AnyEdge[] = canvas.edges ?? []): { canvas: JSONCanvas, clones: AnyNode[] } {
 	const ids = new Map<unknown, string>()
 	const clones = nodes.map((n) => {
 		const box = nodeBox(n)!
@@ -101,13 +101,60 @@ export function cloneNodes(canvas: JSONCanvas, nodes: readonly AnyNode[], offset
 		ids.set(n.id, id)
 		return { ...structuredClone(n), id, x: Math.round(box.minX + offset.x), y: Math.round(box.minY + offset.y) }
 	})
-	const edges = (canvas.edges ?? [])
+	const copies = edges
 		.filter(e => ids.has(e.fromNode) && ids.has(e.toNode))
 		.map(e => ({ ...structuredClone(e), id: newId(), fromNode: ids.get(e.fromNode)!, toNode: ids.get(e.toNode)! }))
 	return {
-		canvas: { ...canvas, nodes: orderNodes([...(canvas.nodes ?? []), ...clones]), edges: [...(canvas.edges ?? []), ...edges] },
+		canvas: { ...canvas, nodes: orderNodes([...(canvas.nodes ?? []), ...clones]), edges: [...(canvas.edges ?? []), ...copies] },
 		clones,
 	}
+}
+
+/** The clipboard type Obsidian keeps canvas data under, so cards copy between this editor and Obsidian. */
+export const CANVAS_CLIP_TYPE = 'obsidian/canvas'
+
+/** Copied nodes, the edges among them, and the centre of the box around the nodes. */
+export interface CanvasClip {
+	nodes: AnyNode[]
+	edges: AnyEdge[]
+	center: Point
+}
+
+/** A clip of `nodes` (those with a box) and the edges among them; `undefined` when none has a box. */
+export function copyClip(canvas: JSONCanvas, nodes: readonly AnyNode[]): CanvasClip | undefined {
+	const boxed = nodes.filter(n => nodeBox(n))
+	const box = unionBBox(boxed.map(n => nodeBox(n)!))
+	if (!box) return
+	const ids = new Set(boxed.map(n => n.id))
+	return { nodes: boxed, edges: (canvas.edges ?? []).filter(e => ids.has(e.fromNode) && ids.has(e.toNode)), center: centerOf(box) }
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * The clip in clipboard text: JSON with a `nodes` array. Pasted text is untrusted, so nodes without a box are left
+ * out and the rest is normalized as a file is; `undefined` when no node is left.
+ */
+export function readClip(text: string): CanvasClip | undefined {
+	let data: unknown
+	try {
+		data = JSON.parse(text)
+	}
+	catch {
+		return
+	}
+	if (!isObject(data) || !Array.isArray(data.nodes)) return
+	const { canvas } = normalizeCanvas({
+		nodes: data.nodes.filter(n => isObject(n) && nodeBox(n as AnyNode)),
+		edges: Array.isArray(data.edges) ? data.edges.filter(isObject) as AnyEdge[] : [],
+	})
+	const box = unionBBox(canvas.nodes!.map(n => nodeBox(n)!))
+	return box && { nodes: canvas.nodes!, edges: canvas.edges!, center: centerOf(box) }
+}
+
+/** Adds `clip` to `canvas` with new ids, centred on `at`. Returns the canvas and the new nodes. */
+export function pasteClip(canvas: JSONCanvas, clip: CanvasClip, at: Point): { canvas: JSONCanvas, clones: AnyNode[] } {
+	return cloneNodes(canvas, clip.nodes, { x: at.x - clip.center.x, y: at.y - clip.center.y }, clip.edges)
 }
 
 /**

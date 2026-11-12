@@ -65,7 +65,8 @@ The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the
 | `listLinks(path)` → `{ file, subpath? }[]` | a note's links in a dropped edge's menu |
 | `openFile(path, subpath, newTab)` | double-click (or Mod+click) on a card's name, a click on a selected generic or canvas card |
 | `openLink(target)` | `[[wiki-links]]` in cards |
-| `importFiles(files)` | pasting and dropping files (coming with the clipboard) |
+| `importFiles(files)` → paths | files pasted or dropped onto the canvas (from the OS) become file cards |
+| `filesIn(data)` → paths | the app's own drags and pastes (rows from its file tree) become file cards; read `data` before any `await` |
 
 Loaded files are cached; call `refreshFiles(paths?)` when they change outside the canvas.
 
@@ -109,8 +110,9 @@ The editor currently:
 - A floating toolbar above the selection, by what's selected: Remove, Set color (presets or any color), Zoom to selection, Edit, Create group, Align (align, arrange, distribute, justify), Line direction, Edit/Remove label, Set/Edit a group's background
 - Right-click on empty canvas to add cards, files, media, web pages, groups or custom cards, undo/redo, select all, zoom to fit and toggle snapping and read-only; on a multi-selection for the toolbar's actions. Double-click empty canvas to add a card; Mod+drag to add one at the drawn size
 - Controls for settings, zoom, undo/redo and a help dialog of every gesture and key; a bottom bar to click or drag new cards in; a hint on an empty canvas
+- Copy, cut and paste cards with the edges among them (Obsidian's `obsidian/canvas` clipboard format, so cards copy to and from Obsidian, plus the JSON as plain text). Pasted text becomes a card, a pasted `http(s)` URL a web page, pasted or dropped files file cards (`host.importFiles`); the app's own drags through `host.filesIn`. A host without browser clipboard events (WebKit fires none with no text selected) can call `actions.copy(dataTransfer)` / `actions.paste(dataTransfer)` itself
 
-Copy, paste and drops come next.
+Export as PNG comes next.
 
 Inspiration and reference implementations for rendering-only solutions:
 

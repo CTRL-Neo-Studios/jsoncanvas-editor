@@ -28,6 +28,11 @@ export interface CanvasHost {
 	pickFile?: (options?: { kinds?: FileKind[] }) => Promise<string | undefined>
 	/** Stores files dropped or pasted onto the canvas; resolves to their paths. */
 	importFiles?: (files: File[]) => Promise<string[]>
+	/**
+	 * Paths of the app's own files a drop or paste carries in the app's own format (rows dragged from its file tree);
+	 * `undefined` when it carries none. Called during the event, so `data` must be read before any `await`.
+	 */
+	filesIn?: (data: DataTransfer) => string[] | Promise<string[]> | undefined
 	/** The places the note at `path` links to. */
 	listLinks?: (path: string) => CanvasLink[] | Promise<CanvasLink[]>
 	/** Opens a file outside the canvas (`newTab` with Mod held). */

@@ -609,3 +609,84 @@ describe('chrome', () => {
 		expect(wrapper.emitted('update:readonly')!.at(-1)).toEqual([false])
 	})
 })
+
+describe('clipboard and drops', () => {
+	/** Fires a clipboard event as the browser does (at the document) with the canvas focused. */
+	function clipboard(type: 'copy' | 'cut' | 'paste', data: Record<string, string> | DataTransfer = {}) {
+		const transfer = data instanceof DataTransfer ? data : new DataTransfer()
+		if (!(data instanceof DataTransfer)) for (const [k, v] of Object.entries(data)) transfer.setData(k, v)
+		;(root() as HTMLElement).focus()
+		const e = new ClipboardEvent(type, { clipboardData: transfer, bubbles: true, cancelable: true })
+		document.dispatchEvent(e)
+		return { handled: e.defaultPrevented, transfer }
+	}
+	const added = (before: number) => doc().nodes!.slice(before) as JSONCanvasNode[]
+
+	it('copies cards with the edges among them and their colors, and pastes them with new ids at the view\'s centre', async () => {
+		await setup({
+			nodes: [{ ...card('a', 0, 0), color: '3' }, card('b', 300, 0), card('c', 600, 0)],
+			edges: [{ id: 'ab', fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'left', color: '2' }, { id: 'bc', fromNode: 'b', fromSide: 'right', toNode: 'c', toSide: 'left' }],
+		})
+		wrapper.vm.select(['a', 'b'])
+		const { handled, transfer } = clipboard('copy')
+		expect(handled).toBe(true)
+		expect(transfer.getData('text/plain')).toBe(transfer.getData('obsidian/canvas'))
+
+		expect(clipboard('paste', transfer).handled).toBe(true)
+		const [a, b] = added(3)
+		expect([a, b].map(n => [n!.x, n!.y, n!.text, n!.color])).toEqual([[-200, -25, 'a', '3'], [100, -25, 'b', undefined]])
+		expect(a!.id).not.toBe('a')
+		expect(doc().edges!.at(-1)).toMatchObject({ fromNode: a!.id, toNode: b!.id, color: '2' })
+		expect(doc().edges).toHaveLength(3)
+		expect(selected()).toEqual([a!.id, b!.id].sort())
+
+		// Canvas data as plain text (another app, or a host's own clipboard) pastes the same way.
+		clipboard('paste', { 'text/plain': transfer.getData('text/plain') })
+		expect(doc().nodes).toHaveLength(7)
+
+		wrapper.vm.select(['c'])
+		expect(clipboard('cut').handled).toBe(true)
+		expect(doc().nodes!.some(n => n.id === 'c')).toBe(false)
+	})
+
+	it('pastes a URL as a web page and other text as a card being edited; nothing in read-only', async () => {
+		await setup({ nodes: [] })
+		clipboard('paste', { 'text/plain': ' https://example.com/x ' })
+		expect(added(0)).toMatchObject([{ type: 'link', url: 'https://example.com/x', x: -200, y: -200, width: 400, height: 400 }])
+		clipboard('paste', { 'text/plain': 'https://youtu.be/abc' })
+		expect(added(1)).toMatchObject([{ type: 'link', width: 640, height: 360 }])
+		clipboard('paste', { 'text/plain': 'www.example.com' })
+		expect(added(2)).toMatchObject([{ type: 'text', text: 'www.example.com', x: -125, y: -30, width: 250, height: 60 }])
+		await nextTick()
+		expect(wrapper.find('textarea').exists()).toBe(true)
+
+		await wrapper.setProps({ readonly: true })
+		expect(clipboard('paste', { 'text/plain': 'more' }).handled).toBe(false)
+		expect(doc().nodes).toHaveLength(3)
+	})
+
+	it('imports pasted files and adds them in rows; the host\'s own drops land at the drop point', async () => {
+		const importFiles = vi.fn(async (files: File[]) => files.map(f => `in/${f.name}`))
+		const filesIn = (data: DataTransfer) => data.getData('x-app/paths') ? data.getData('x-app/paths').split('\n') : undefined
+		await setup({ nodes: [] }, { host: { importFiles, filesIn } })
+		const files = new DataTransfer()
+		for (let i = 0; i < 12; i++) files.items.add(new File(['x'], `${i}.png`, { type: 'image/png' }))
+		expect(clipboard('paste', files).handled).toBe(true)
+		await flushPromises()
+		expect(importFiles).toHaveBeenCalledOnce()
+		const grid = added(0)
+		expect(grid).toHaveLength(12)
+		expect([grid[0], grid[9], grid[10]].map(n => [n!.file, n!.x, n!.y, n!.width, n!.height])).toEqual([
+			['in/0.png', -2202, -422, 400, 400], ['in/9.png', 1803, -422, 400, 400], ['in/10.png', -2202, 23, 400, 400],
+		])
+		expect(selected()).toHaveLength(12)
+
+		const rows = new DataTransfer()
+		rows.setData('x-app/paths', 'Notes/a.md')
+		// happy-dom's DragEvent takes neither a transfer nor a position.
+		const drop = new MouseEvent('drop', { bubbles: true, cancelable: true, clientX: W / 2 + 1000, clientY: H / 2 })
+		root().dispatchEvent(Object.assign(drop, { dataTransfer: rows }))
+		await flushPromises()
+		expect(added(12)).toMatchObject([{ type: 'file', file: 'Notes/a.md', x: 800, y: -200 }])
+	})
+})

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cloneNodes, raiseNodes, removeFromCanvas, resizeBox, resizeSnapSource, scaleBoxes, setBackground, type BBox, type JSONCanvas } from '../src/runtime/core'
+import { cloneNodes, copyClip, pasteClip, raiseNodes, readClip, removeFromCanvas, resizeBox, resizeSnapSource, scaleBoxes, setBackground, type BBox, type JSONCanvas } from '../src/runtime/core'
 
 const box = (minX: number, minY: number, maxX: number, maxY: number): BBox => ({ minX, minY, maxX, maxY })
 
@@ -65,6 +65,23 @@ describe('document edits', () => {
 		const copy = out.edges!.at(-1)!
 		expect(out.edges).toHaveLength(3)
 		expect(copy).toMatchObject({ fromNode: clones[0]!.id, toNode: clones[1]!.id, color: '2' })
+	})
+
+	it('copies nodes with the edges among them, and pastes them centred on a point with new ids', () => {
+		const clip = copyClip(canvas, [a, b])!
+		expect(clip.edges.map(e => e.id)).toEqual(['ab'])
+		expect(clip.center).toEqual({ x: 155, y: 35 })
+		const { canvas: out, clones } = pasteClip({ nodes: [] }, readClip(JSON.stringify(clip))!, { x: 0, y: 0 })
+		expect(clones.map(n => [n.x, n.y, n.text])).toEqual([[-145, -25, 'a'], [45, -25, 'b']])
+		expect(out.edges).toEqual([{ id: expect.any(String), fromNode: clones[0]!.id, toNode: clones[1]!.id, color: '2', fromSide: 'right', toSide: 'left' }])
+		expect(out.edges![0]!.id).not.toBe('ab')
+	})
+
+	it('reads canvas data from clipboard text, leaving out nodes without a box', () => {
+		expect(readClip('hello')).toBeUndefined()
+		expect(readClip('{"nodes":[]}')).toBeUndefined()
+		const clip = readClip('{"nodes":[{"id":"x","type":"text"},null,{"id":"y","type":"text","text":"t","x":0.4,"y":0,"width":10,"height":10}],"edges":[null]}')
+		expect(clip).toEqual({ nodes: [{ id: 'y', type: 'text', text: 't', x: 0, y: 0, width: 10, height: 10 }], edges: [], center: { x: 5, y: 5 } })
 	})
 })
 
