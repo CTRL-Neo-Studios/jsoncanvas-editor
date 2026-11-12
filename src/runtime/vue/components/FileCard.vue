@@ -94,7 +94,7 @@ watch([() => props.editing, text], ([on, note]) => {
 	if (edit.value || note === undefined) return
 	const range = typeof note === 'string' && kind.value === 'markdown' ? markdownSectionRange(note, node.value.subpath ?? '') : undefined
 	// Missing, unreadable, or narrowed to a heading or block the note lacks: nothing to edit.
-	if (!range) return done()
+	if (note === null || !range) return done()
 	edit.value = { path: node.value.file, note, ...range, text: note.slice(range.from, range.to) }
 }, { immediate: true })
 

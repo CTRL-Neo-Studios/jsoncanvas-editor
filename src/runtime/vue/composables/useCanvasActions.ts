@@ -2,7 +2,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, type ComputedRef, type Ref } from 'vue'
 import {
 	alignRects, arrangeRects, CANVAS_CLIP_TYPE, copyClip, distributeRects, fileKind, gridSpacing, GROUP_PADDING, growBBox,
-	justifyRects, newId, NODE_SIZE, orderNodes, pasteClip, pointBox, PRESET_COLORS, readClip, rectOf, removeFromCanvas,
+	justifyRects, newId, NODE_SIZE, obsidianKeyOrder, orderNodes, pasteClip, pointBox, PRESET_COLORS, readClip, rectOf, removeFromCanvas,
 	setBackground, unionBBox,
 	type AlignMode, type ArrangeMode, type Axis, type BBox, type CanvasEnd, type FileKind, type JSONCanvasEdge,
 	type JSONCanvasGroupNode, type Point, type Rect,
@@ -169,10 +169,10 @@ export function useCanvasActions(editor: CanvasEditor, interaction: CanvasIntera
 		editor.commit({ ...doc, nodes: doc.nodes!.map(n => change.get(n) ?? n) })
 	}
 
-	/** Inserts `nodes` (groups go behind, as always) and selects them. */
+	/** Inserts `nodes` (keys in Obsidian's order; groups go behind, as always) and selects them. */
 	function insert(...nodes: Array<Record<string, unknown> & { id: string }>) {
 		const doc = editor.canvas.value
-		editor.commit({ ...doc, nodes: orderNodes([...doc.nodes ?? [], ...nodes]) })
+		editor.commit({ ...doc, nodes: orderNodes([...doc.nodes ?? [], ...nodes.map(obsidianKeyOrder)]) })
 		editor.select(nodes.map(n => n.id))
 	}
 

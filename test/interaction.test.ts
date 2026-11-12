@@ -2,7 +2,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, useTemplateRef, type VNode } from 'vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { JSONCanvas, JSONCanvasEdge, JSONCanvasNode } from '../src/runtime/core'
+import { stringifyCanvas, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasNode } from '../src/runtime/core'
 import CanvasMenu from '../src/runtime/vue/components/CanvasMenu.vue'
 import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
 import { IS_MAC } from '../src/runtime/vue/utils/platform'
@@ -516,6 +516,99 @@ describe('card content', () => {
 		await drag(wrapper.find('.jc-handle[data-resize="right"]').element, [[300, 200], [200, 200], [150, 200]], NO_SNAP)
 		expect(box('img')).toEqual([0, 0, 150, 200])
 	})
+
+	describe('note cards', () => {
+		const dblclick = (key: string) => {
+			nodeEl(key).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+			return nextTick()
+		}
+		const textarea = (key: string) => wrapper.find(`[data-key="${key}"] textarea`)
+
+		it('edits a note in place: written to the note, shown by every card of it, and not a canvas undo step', async () => {
+			const writeText = vi.fn()
+			await setup({ nodes: [file('a', 'n.md'), file('b', 'n.md', { x: -450 })] }, { host: { readText: () => '# A\none', writeText } })
+			await flushPromises()
+			wrapper.vm.select(['a'])
+			await nextTick()
+			expect(wrapper.findAll('.jc-toolbar button[aria-label]').map(b => b.attributes('aria-label'))).toContain('Edit')
+			await dblclick('a')
+			expect((textarea('a').element as HTMLTextAreaElement).value).toBe('# A\none')
+			await textarea('a').setValue('# A\nnew')
+			await textarea('a').trigger('keydown', { key: 'Escape' })
+			await flushPromises()
+			expect(writeText.mock.calls).toEqual([['n.md', '# A\nnew']])
+			expect(wrapper.find('textarea').exists()).toBe(false)
+			await vi.waitFor(() => expect(wrapper.find('[data-key="b"] .jc-markdown').text()).toContain('new'))
+			expect(wrapper.find('[data-key="a"] .jc-markdown').text()).toContain('new')
+			expect(wrapper.vm.canUndo).toBe(false)
+			expect(emits()).toBe(0)
+		})
+
+		it('edits only the heading a card is narrowed to, keeping the rest of the note as it was', async () => {
+			const note = '---\ntags: x\n---\n# A\none\n\n# B\ntwo ^b\n'
+			const writeText = vi.fn()
+			await setup({ nodes: [file('a', 'n.md', { subpath: '#A' })] }, { host: { readText: () => note, writeText } })
+			await flushPromises()
+			await dblclick('a')
+			expect((textarea('a').element as HTMLTextAreaElement).value).toBe('# A\none\n')
+			await textarea('a').setValue('# A\nONE\n')
+			await click(root(), -400, -300)
+			await flushPromises()
+			expect(writeText.mock.calls).toEqual([['n.md', note.replace('one', 'ONE')]])
+		})
+
+		it('stays read-only without host.writeText', async () => {
+			await setup({ nodes: [file('a', 'n.md')] }, { host: { readText: () => '# A' } })
+			await flushPromises()
+			await dblclick('a')
+			expect(wrapper.find('textarea').exists()).toBe(false)
+			wrapper.vm.select(['a'])
+			await nextTick()
+			expect(wrapper.findAll('.jc-toolbar button[aria-label]').map(b => b.attributes('aria-label'))).not.toContain('Edit')
+		})
+
+		it('takes its editor from #note-editor', async () => {
+			const writeText = vi.fn()
+			let editor: { path: string, text: string, update: (text: string) => void, done: () => void } | undefined
+			await setup({ nodes: [file('a', 'n.md')] }, { host: { readText: () => 'old', writeText } }, {
+				'note-editor': (props) => {
+					editor = props as unknown as typeof editor
+					return [h('div', { class: 'my-editor' }, editor!.text)]
+				},
+			})
+			await flushPromises()
+			await dblclick('a')
+			expect(wrapper.find('.my-editor').text()).toBe('old')
+			expect(editor!.path).toBe('n.md')
+			editor!.update('new')
+			editor!.done()
+			await flushPromises()
+			expect(writeText.mock.calls).toEqual([['n.md', 'new']])
+			expect(wrapper.find('.my-editor').exists()).toBe(false)
+		})
+
+		it('reports a failed write and keeps what was typed in the editor', async () => {
+			const errors: string[] = []
+			await setup({ nodes: [file('a', 'n.md')] }, {
+				host: { readText: () => 'old', writeText: async () => Promise.reject(new Error('disk full')) },
+				onError: (e: { action: string }) => errors.push(e.action),
+			})
+			await flushPromises()
+			await dblclick('a')
+			await textarea('a').setValue('typed')
+			// Saved shortly after typing, while still editing.
+			await vi.waitFor(() => expect(errors).toEqual(['writeText']))
+			expect((textarea('a').element as HTMLTextAreaElement).value).toBe('typed')
+		})
+	})
+
+	it('opens a web link clicked in Markdown with host.openUrl', async () => {
+		const openUrl = vi.fn()
+		await setup({ nodes: [{ ...card('a', 0, 0), text: '[site](https://example.com/)' }] }, { host: { openUrl } })
+		await vi.waitFor(() => expect(wrapper.find('[data-key="a"] .jc-markdown a').exists()).toBe(true))
+		await wrapper.find('[data-key="a"] .jc-markdown a').trigger('click')
+		expect(openUrl).toHaveBeenCalledWith('https://example.com/')
+	})
 })
 
 describe('chrome', () => {
@@ -715,6 +808,27 @@ describe('clipboard and drops', () => {
 		root().dispatchEvent(Object.assign(drop, { dataTransfer: rows }))
 		await flushPromises()
 		expect(added(12)).toMatchObject([{ type: 'file', file: 'Notes/a.md', x: 800, y: -200 }])
+	})
+
+	it('writes the nodes it creates with their keys in Obsidian\'s order', async () => {
+		const sticky = { label: 'Sticky', icon: 'i-lucide-sticky-note', node: { type: 'text', text: 'hi', color: '3', width: 200, height: 100 } }
+		const filesIn = (data: DataTransfer) => data.getData('x-app/paths') ? [data.getData('x-app/paths')] : undefined
+		await setup({ nodes: [] }, { host: { filesIn }, cardTemplates: [sticky] })
+		const at = { at: { x: 0, y: 0 } }
+		wrapper.vm.actions.add('card', at)
+		wrapper.vm.actions.add(sticky, at)
+		wrapper.vm.actions.add('group', at)
+		clipboard('paste', { 'text/plain': 'https://example.com' })
+		clipboard('paste', { 'x-app/paths': 'a.md' })
+		await flushPromises()
+		// As Obsidian 1.15.1 writes a node it creates: id, box, color, type, then the type's fields.
+		expect(stringifyCanvas(doc()).split('\n').filter(l => l.includes('"id"')).map(l => l.trim().replace(/"id":"\w+"/, '"id":"n"'))).toEqual([
+			'{"id":"n","x":0,"y":0,"width":400,"height":400,"type":"group","label":"Untitled group"},',
+			'{"id":"n","x":0,"y":0,"width":250,"height":60,"type":"text","text":""},',
+			'{"id":"n","x":0,"y":0,"width":200,"height":100,"color":"3","type":"text","text":"hi"},',
+			'{"id":"n","x":-200,"y":-200,"width":400,"height":400,"type":"link","url":"https://example.com"},',
+			'{"id":"n","x":-200,"y":-200,"width":400,"height":400,"type":"file","file":"a.md"}',
+		])
 	})
 })
 

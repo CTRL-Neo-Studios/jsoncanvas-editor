@@ -2,7 +2,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, onScopeDispose, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
 	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, curveDistance, edgeGeometry, fileKind, gridSpacing, growBBox, intersectsBBox,
-	lockAxis, MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, oppositeSide, pointBox, raiseNodes, removeFromCanvas,
+	lockAxis, MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, obsidianKeyOrder, oppositeSide, pointBox, raiseNodes, removeFromCanvas,
 	resizeBox, resizeSnapSource, scaleBoxes, snap, unionBBox,
 	type BBox, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
 	type ResizeHandle, type SnapGuide,
@@ -864,7 +864,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 			editor.commit({ ...doc, nodes: doc.nodes!.map(n => (n === item.node ? node : n)) })
 		},
 		addNode(fields) {
-			const node = { id: newId(), ...fields }
+			const node = obsidianKeyOrder({ id: newId(), ...fields })
 			const doc = editor.canvas.value
 			editor.commit({ ...doc, nodes: [...doc.nodes ?? [], node] })
 			editor.select([String(node.id)])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileKind, markdownSection } from '../src/runtime/core'
+import { fileKind, markdownSection, markdownSectionRange } from '../src/runtime/core'
 
 it('fileKind groups files by extension, as Obsidian does', () => {
 	expect(fileKind('Notes/a.md')).toBe('markdown')
@@ -73,5 +73,20 @@ describe('markdownSection', () => {
 		expect(markdownSection(doc, '#Missing')).toBeUndefined()
 		expect(markdownSection(doc, '#^missing')).toBeUndefined()
 		expect(markdownSection(doc, '#not a heading')).toBeUndefined()
+	})
+
+	it('has a range in the text that slices to the section, past frontmatter and with CRLF line endings', () => {
+		const crlf = doc.replaceAll('\n', '\r\n')
+		for (const text of [doc, crlf]) {
+			for (const subpath of ['', '#Setup', '#intro#SETUP#Details', '#Other', '#^para', '#^multi', '#^item', '#^table']) {
+				const range = markdownSectionRange(text, subpath)!
+				expect(text.slice(range.from, range.to).replaceAll('\r\n', '\n'), subpath).toBe(markdownSection(doc, subpath))
+			}
+		}
+		// A block's range stops before its id, so the id survives an edit.
+		const { from, to } = markdownSectionRange(doc, '#^para')!
+		expect(doc.slice(0, from) + 'Edited.' + doc.slice(to)).toBe(doc.replace('Use it. ^para', 'Edited. ^para'))
+		expect(markdownSectionRange(doc, '#Missing')).toBeUndefined()
+		expect(markdownSectionRange(doc, '#^missing')).toBeUndefined()
 	})
 })

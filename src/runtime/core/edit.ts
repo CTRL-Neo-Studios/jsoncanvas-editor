@@ -18,6 +18,17 @@ export const NODE_SIZE: Record<'text' | 'file', { width: number, height: number 
 	file: { width: 400, height: 400 },
 }
 
+const NEW_NODE_KEYS = ['id', 'x', 'y', 'width', 'height', 'color', 'type']
+
+/**
+ * `node` with its keys in the order Obsidian writes a node it creates: `id`, `x`, `y`, `width`, `height`, `color`,
+ * `type`, then the rest (its type's fields). Loaded nodes keep their order, in Obsidian too.
+ */
+export function obsidianKeyOrder<T extends Record<string, unknown>>(node: T): T {
+	const first = NEW_NODE_KEYS.filter(k => k in node).map(k => [k, node[k]])
+	return Object.fromEntries([...first, ...Object.entries(node).filter(([k]) => !NEW_NODE_KEYS.includes(k))]) as T
+}
+
 /**
  * What a resize snaps by, and on which axes: the dragged edge as a line through the pointer, or the pointer itself
  * for a corner.
