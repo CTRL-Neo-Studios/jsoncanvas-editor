@@ -3,6 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type VNode } from 'vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { JSONCanvas, JSONCanvasEdge, JSONCanvasNode } from '../src/runtime/core'
+import CanvasMenu from '../src/runtime/vue/components/CanvasMenu.vue'
 import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
 import { IS_MAC } from '../src/runtime/vue/utils/platform'
 import DropdownMenuStub from './stubs/DropdownMenuStub.vue'
@@ -60,6 +61,17 @@ const box = (id: string) => {
 }
 const emits = () => wrapper.emitted('update:modelValue')?.length ?? 0
 const selected = () => [...wrapper.vm.selected as Set<string>].sort()
+/** Closes the canvas's menu (a click elsewhere or Escape) without choosing. */
+const closeMenu = () => wrapper.findComponent(CanvasMenu).findComponent(DropdownMenuStub).vm.$emit('update:open', false)
+const menuItem = (label: string) => wrapper.find(`.menu-stub [data-label="${label}"]`)
+/** Right-clicks `target`. Vue drops an event from the millisecond its listener was added, so the clock moves on first. */
+function contextMenu(target: Element, x: number, y: number) {
+	vi.useFakeTimers({ toFake: ['Date'] })
+	vi.setSystemTime(Date.now() + 1000)
+	target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x + W / 2, clientY: y + H / 2 }))
+	vi.useRealTimers()
+	return nextTick()
+}
 
 function pointer(type: string, target: EventTarget, x: number, y: number, init: PointerEventInit = {}) {
 	target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, button: 0, clientX: x + W / 2, clientY: y + H / 2, ...init }))
@@ -243,15 +255,6 @@ describe('edges', () => {
 		await drag(wrapper.find(`.jc-connect[data-connect="${side}"]`).element, points)
 	}
 	const hit = (key = 'e') => wrapper.find(`[data-edge="${key}"] .jc-edge-hit`).element
-	const menuItem = (label: string) => wrapper.find(`.menu-stub [data-label="${label}"]`)
-	/** Right-clicks `target`. Vue drops an event from the millisecond its listener was added, so the clock moves on first. */
-	function contextMenu(target: Element, x: number, y: number) {
-		vi.useFakeTimers({ toFake: ['Date'] })
-		vi.setSystemTime(Date.now() + 1000)
-		target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x + W / 2, clientY: y + H / 2 }))
-		vi.useRealTimers()
-		return nextTick()
-	}
 	const ab = { nodes: [card('a', 0, 0), card('b', 300, 0)], edges: [{ id: 'e', fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'left' }] } as JSONCanvas
 
 	it('connects to the nearest side of the node it\'s dropped on', async () => {
@@ -268,7 +271,7 @@ describe('edges', () => {
 		await setup({ nodes: [g, card('a', 0, 0)] })
 		await connect(50, 25, 'bottom', [[50, 50], [50, 120], [50, 145]]) // g's bottom midpoint is (200, 150)
 		expect(menuItem('Add card').exists()).toBe(true)
-		wrapper.findComponent(DropdownMenuStub).vm.$emit('update:open', false)
+		closeMenu()
 		await nextTick()
 		await connect(-45, 100, 'top', [[200, -50], [10, 20], [5, 25]]) // from g, onto a's left side
 		expect(menuItem('Add card').exists()).toBe(true)
@@ -278,7 +281,7 @@ describe('edges', () => {
 		await setup({ nodes: [card('a', 0, 0)] })
 		await connect(50, 25, 'right', [[100, 25], [300, 25], [400, 25]])
 		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(true)
-		wrapper.findComponent(DropdownMenuStub).vm.$emit('update:open', false)
+		closeMenu()
 		await nextTick()
 		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(false)
 		expect(edges()).toHaveLength(0)
@@ -485,5 +488,124 @@ describe('card content', () => {
 		await nextTick()
 		await drag(wrapper.find('.jc-handle[data-resize="right"]').element, [[300, 200], [200, 200], [150, 200]], NO_SNAP)
 		expect(box('img')).toEqual([0, 0, 150, 200])
+	})
+})
+
+describe('chrome', () => {
+	const toolbar = () => wrapper.findAll('.jc-toolbar button[aria-label]').map(b => b.attributes('aria-label'))
+	const group = (id: string, x: number, y: number, extra = {}) => ({ id, type: 'group', x, y, width: 300, height: 200, ...extra })
+	const link = { id: 'l', type: 'link', url: 'https://example.com', x: 0, y: 300, width: 200, height: 100 }
+	const edge = (id: string, extra = {}) => ({ id, fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'left', ...extra })
+	const keys = (k: string[]) => wrapper.vm.select(k)
+
+	it('shows the toolbar\'s buttons for what is selected, as Obsidian does', async () => {
+		await setup({
+			nodes: [group('g', -400, -400), card('a', 0, 0), card('b', 300, 0), link],
+			edges: [edge('e'), edge('f', { label: 'L' })],
+		}, { host: { pickFile: async () => undefined } })
+		const rows: Array<[string[], string[]]> = [
+			[['a'], ['Remove', 'Set color', 'Zoom to selection', 'Edit']],
+			[['l'], ['Remove', 'Set color', 'Zoom to selection']],
+			[['g'], ['Remove', 'Set color', 'Zoom to selection', 'Align', 'Edit label', 'Set background']],
+			[['e'], ['Remove', 'Set color', 'Zoom to selection', 'Line direction', 'Edit label']],
+			[['f'], ['Remove', 'Set color', 'Zoom to selection', 'Line direction', 'Remove label', 'Edit label']],
+			[['e', 'f'], ['Remove', 'Set color', 'Zoom to selection', 'Line direction']],
+			[['a', 'b'], ['Remove', 'Set color', 'Zoom to selection', 'Create group', 'Align']],
+		]
+		for (const [selection, buttons] of rows) {
+			keys(selection)
+			await nextTick()
+			expect(toolbar(), selection.join()).toEqual(buttons)
+		}
+		await wrapper.setProps({ readonly: true })
+		keys(['a'])
+		await nextTick()
+		expect(toolbar()).toEqual(['Zoom to selection'])
+	})
+
+	it('colors the selection from the toolbar, and groups it', async () => {
+		await setup({ nodes: [card('a', 0, 0), card('b', 300, 0)], edges: [edge('e')] })
+		keys(['a', 'b', 'e'])
+		await nextTick()
+		await wrapper.find('[data-action="color"]').trigger('click')
+		await wrapper.find('.jc-swatch[data-color="4"]').trigger('click')
+		expect([...doc().nodes!, ...doc().edges!].map(i => i.color)).toEqual(['4', '4', '4'])
+		expect(wrapper.find('.jc-swatches').exists()).toBe(false)
+		await wrapper.find('[data-action="color"]').trigger('click')
+		await wrapper.find('.jc-swatch:not(.jc-themed)').trigger('click')
+		expect(doc().nodes!.some(n => 'color' in n)).toBe(false)
+
+		keys(['a', 'b'])
+		await nextTick()
+		await wrapper.find('[aria-label="Create group"]').trigger('click')
+		expect(doc().nodes![0]).toMatchObject({ type: 'group', label: 'Untitled group', x: -20, y: -20, width: 440, height: 90 })
+		expect(wrapper.find('.jc-group-label[contenteditable]').exists()).toBe(true)
+	})
+
+	it('aligns a group\'s contents within it', async () => {
+		await setup({ nodes: [group('g', 0, 0), card('a', 100, 100), card('b', 150, 30)] })
+		keys(['g'])
+		wrapper.vm.actions.layout('left')
+		expect([box('a')[0], box('b')[0]]).toEqual([20, 20])
+	})
+
+	it('adds cards from the empty canvas: right-click menu, double-click, and Mod+drag', async () => {
+		await setup({ nodes: [] })
+		expect(wrapper.find('.jc-empty').exists()).toBe(true)
+		await contextMenu(root(), 100, 100)
+		expect(menuItem('Select all').exists()).toBe(true)
+		await menuItem('Add card').trigger('click')
+		expect(doc().nodes![0]).toMatchObject({ type: 'text', x: 100, y: 100, width: 250, height: 60 })
+		expect(wrapper.find('textarea').exists()).toBe(true)
+
+		root().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: W / 2 - 300, clientY: H / 2 }))
+		await nextTick()
+		expect(doc().nodes![1]).toMatchObject({ type: 'text', x: -425, y: -30, width: 250, height: 60 })
+
+		await drag(root(), [[0, 200], [100, 250], [200, 290]], MOD)
+		await menuItem('Create group').trigger('click')
+		expect(doc().nodes![0]).toMatchObject({ type: 'group', x: 0, y: 200, width: 200, height: 90 })
+	})
+
+	it('adds a card from the bottom bar: a click in the middle of the view, a drag where it\'s dropped', async () => {
+		await setup({ nodes: [] })
+		const button = wrapper.find('.jc-card-bar [aria-label="Drag to add card"]').element
+		await drag(button, [[0, 380]])
+		expect(doc().nodes![0]).toMatchObject({ x: -125, y: -30 })
+		await drag(button, [[0, 380], [0, 300], [203, 197]])
+		// Centred on the pointer (78, 167), then onto the grid.
+		expect(doc().nodes![1]).toMatchObject({ type: 'text', x: 80, y: 160, width: 250, height: 60 })
+	})
+
+	it('hides the chrome by prop, replaces it by slot, and takes its strings from `messages`', async () => {
+		await setup({ nodes: [card('a', 0, 0)] }, { toolbar: false, messages: { dragToAddCard: 'Karte hinzufügen' } }, { controls: () => [h('i', { class: 'my-controls' })] })
+		keys(['a'])
+		await nextTick()
+		expect(wrapper.find('.jc-toolbar').exists()).toBe(false)
+		expect(wrapper.find('.jc-controls').exists()).toBe(false)
+		expect(wrapper.find('.my-controls').exists()).toBe(true)
+		expect(wrapper.find('.jc-card-bar [aria-label="Karte hinzufügen"]').exists()).toBe(true)
+		await wrapper.setProps({ cardBar: false })
+		expect(wrapper.find('.jc-card-bar').exists()).toBe(false)
+	})
+
+	it('lets the host extend context menus through the `menu` event', async () => {
+		const mine = vi.fn()
+		await setup({ nodes: [card('a', 0, 0)] }, { onMenu: (e: { kind: string, items: unknown[][] }) => e.kind === 'node' && e.items.push([{ label: 'Mine', onSelect: mine }]) })
+		await contextMenu(nodeEl('a'), 10, 10)
+		expect(menuItem('Zoom to selection').exists()).toBe(true)
+		await menuItem('Mine').trigger('click')
+		expect(mine).toHaveBeenCalled()
+	})
+
+	it('toggles read-only from the controls, and undo follows the history', async () => {
+		await setup({ nodes: [card('a', 0, 0)] })
+		const undo = () => wrapper.find('.jc-controls [aria-label="Undo"]').element as HTMLButtonElement
+		expect(undo().disabled).toBe(true)
+		await key('ArrowRight')
+		expect(undo().disabled).toBe(false)
+		await wrapper.setProps({ readonly: true })
+		await wrapper.find('.jc-controls [aria-label="Disable read-only"]').trigger('click')
+		expect(wrapper.emitted('update:readonly')!.at(-1)).toEqual([false])
 	})
 })

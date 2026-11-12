@@ -1,16 +1,26 @@
 import { shallowRef, type InjectionKey, type ShallowRef, type VNode } from 'vue'
 import type { JSONCanvas, JSONCanvasTextNode } from '../../core'
 import type { CanvasHost, FileRenderers, NodeRendererProps, NodeRenderers, ResolvedFile } from '../host'
+import type { CanvasMessages } from '../messages'
+import type { CanvasActions, CanvasSettings, CardTemplate } from './useCanvasActions'
 import type { CanvasEditor } from './useCanvasEditor'
 import type { CanvasInteraction } from './useCanvasInteraction'
 
-/** Slots that replace how cards are shown: whole cards by node type, or a text card's display and editor. */
+/** Slots that replace how cards are shown (whole cards by node type, a text card's display and editor) and the chrome. */
 export interface CanvasSlots {
 	/** A card for nodes of `type` (`#node-shape`, `#node-file`, ...); takes precedence over `nodeRenderers`. */
 	[slot: `node-${string}`]: ((props: NodeRendererProps) => VNode[]) | undefined
 	'text-display'?: (props: { node: JSONCanvasTextNode, text: string }) => VNode[]
 	/** `update` reports the text as it's typed; `done` ends editing (the last `update` is saved). */
 	'text-editor'?: (props: { node: JSONCanvasTextNode, text: string, update: (text: string) => void, done: () => void }) => VNode[]
+	/** Replaces the floating toolbar above the selection. */
+	'toolbar'?: (props: { actions: CanvasActions }) => VNode[]
+	/** Replaces the controls at the right (settings, zoom, undo, help). */
+	'controls'?: (props: { settings: CanvasSettings, actions: CanvasActions, openHelp: () => void }) => VNode[]
+	/** Replaces the bar of cards to add at the bottom. */
+	'card-bar'?: (props: { actions: CanvasActions, templates: readonly CardTemplate[] }) => VNode[]
+	/** Replaces the hint shown on an empty canvas. */
+	'empty'?: () => VNode[]
 }
 
 /** What cards need from the canvas around them (provided by `<JsonCanvas>`). */
@@ -20,6 +30,7 @@ export interface CanvasContent {
 	nodeRenderers: () => NodeRenderers | undefined
 	slots: CanvasSlots
 	readonly: () => boolean
+	messages: () => CanvasMessages
 	interaction: CanvasInteraction
 	/** The host's answer for `path`, cached until `refreshFiles`. Without `resolveFile`, every file exists. */
 	resolveFile: (path: string) => Promise<ResolvedFile>
@@ -43,6 +54,7 @@ export interface CanvasContentOptions {
 	nodeRenderers: () => NodeRenderers | undefined
 	slots: CanvasSlots
 	readonly: () => boolean
+	messages: () => CanvasMessages
 }
 
 export function useCanvasContent(editor: CanvasEditor, interaction: CanvasInteraction, o: CanvasContentOptions): CanvasContent {
@@ -83,6 +95,7 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 		nodeRenderers: o.nodeRenderers,
 		slots: o.slots,
 		readonly: o.readonly,
+		messages: o.messages,
 		interaction,
 		fileVersion,
 		resolveFile: path => cached(files, path, () => o.host()?.resolveFile?.(path) ?? { exists: true }),

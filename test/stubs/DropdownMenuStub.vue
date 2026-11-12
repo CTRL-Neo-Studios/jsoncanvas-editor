@@ -3,13 +3,14 @@
 interface Item {
 	label?: string
 	onSelect?: () => void
-	children?: Item[]
+	children?: Array<Item | Item[]>
 }
 
-const props = defineProps<{ open?: boolean, items?: Item[][] }>()
+const props = defineProps<{ open?: boolean, items?: Array<Item | Item[]> }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
 
-const flat = (items: Item[]): Item[] => items.flatMap(i => [i, ...flat(i.children ?? [])])
+/** Items and their submenus' items, groups (arrays) flattened. */
+const flat = (items: Array<Item | Item[]>): Item[] => items.flat().flatMap(i => [i, ...flat(i.children ?? [])])
 
 function choose(item: Item) {
 	item.onSelect?.()
@@ -18,7 +19,8 @@ function choose(item: Item) {
 </script>
 
 <template>
+	<slot />
 	<div v-if="props.open" class="menu-stub">
-		<button v-for="item in flat((items ?? []).flat())" :key="item.label" :data-label="item.label" @click="choose(item)" />
+		<button v-for="item in flat(items ?? [])" :key="item.label" :data-label="item.label" @click="choose(item)" />
 	</div>
 </template>

@@ -51,7 +51,9 @@ const viewport = ref<Viewport>() // optional; without one the view fits the canv
 </script>
 ```
 
-Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`. The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()` and `refreshFiles()`.
+Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). `v-model:readonly`, `v-model:snapToGrid` and `v-model:snapToObjects` are also changed from the canvas's settings. Other props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`, `cardTemplates`, `modDragBehavior` (what Mod+drag on empty canvas makes: `'menu'`, `'card'`, `'file'`, `'media'`, `'webpage'` or `'group'`), `messages` and `toolbar` / `controls` / `cardBar` (`false` hides them). The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `actions`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()`, `refreshFiles()` and `openHelp()`.
+
+The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the selection, controls at the right (settings, zoom, undo/redo, help), and a bar of cards to add at the bottom. Each can be hidden by prop or replaced by a slot (`#toolbar`, `#controls`, `#card-bar`, `#empty`), which gets `actions` (what the built-in chrome calls). Every string can be replaced through `messages` (`MESSAGES` lists them). Context menus can be extended from the `menu` event: push groups of Nuxt UI menu items onto `event.items` (`event.kind` is `canvas`, `node`, `edge` or `selection`).
 
 `host` (a `CanvasHost`, every member optional) connects the canvas to the app around it; without a member, the canvas leaves out what needs it:
 
@@ -80,7 +82,7 @@ Any card can be replaced, and new node types added, with a component per `type` 
 </JsonCanvas>
 ```
 
-A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves, one undo step; `undefined` removes a key) and `done()` (ends editing). The canvas moves, resizes, connects and snaps any card by its `x`, `y`, `width` and `height`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`, and `addNode({ type, x, y, width, height, ... })` adds one. File cards can also be replaced per extension with `fileRenderers` (`{ base: BaseCard }`, props `node`, `file`, `host`), and a text card's Markdown or editor alone with the `#text-display` / `#text-editor` slots.
+A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves, one undo step; `undefined` removes a key) and `done()` (ends editing). The canvas moves, resizes, connects and snaps any card by its `x`, `y`, `width` and `height`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`, and `addNode({ type, x, y, width, height, ... })` adds one. To offer a custom card in the bottom bar and the add menus, pass `cardTemplates`: `[{ label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: '', width: 250, height: 160 } }]`. File cards can also be replaced per extension with `fileRenderers` (`{ base: BaseCard }`, props `node`, `file`, `host`), and a text card's Markdown or editor alone with the `#text-display` / `#text-editor` slots.
 
 ### Usage (Vue + Vite)
 
@@ -104,8 +106,11 @@ The editor currently:
 - Shows text cards as Markdown (Obsidian's flavour without raw HTML; wiki-links go to `host.openLink`) and edits them on double-click (Escape or a click elsewhere saves). Double-clicking a card's bottom or right edge fits it to its text
 - Shows file cards by kind: notes (narrowed to a `#heading` or `#^block`), images and video (cards keep the media's shape), audio, PDFs (`#page=N`), other canvases as a minimap, and missing files with Swap file / Remove. Link cards show the page in a sandboxed frame (YouTube and X posts as their embeds). Groups show a background image (cover, repeat, or keep its ratio) and rename on double-click
 - Right-click menus for cards: Edit, Edit label, Swap file, Open in new tab, and for links Change URL, Open in browser, Copy URL, Reload page
+- A floating toolbar above the selection, by what's selected: Remove, Set color (presets or any color), Zoom to selection, Edit, Create group, Align (align, arrange, distribute, justify), Line direction, Edit/Remove label, Set/Edit a group's background
+- Right-click on empty canvas to add cards, files, media, web pages, groups or custom cards, undo/redo, select all, zoom to fit and toggle snapping and read-only; on a multi-selection for the toolbar's actions. Double-click empty canvas to add a card; Mod+drag to add one at the drawn size
+- Controls for settings, zoom, undo/redo and a help dialog of every gesture and key; a bottom bar to click or drag new cards in; a hint on an empty canvas
 
-The toolbars, the remaining menus and settings come next.
+Copy, paste and drops come next.
 
 Inspiration and reference implementations for rendering-only solutions:
 

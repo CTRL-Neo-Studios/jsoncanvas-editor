@@ -5,6 +5,7 @@ import { canvasMinimap, fileExtension, fileKind, fileName, markdownSection, pars
 import { CANVAS_CONTENT } from '../composables/useCanvasContent'
 import type { SceneNode } from '../composables/useCanvasEditor'
 import type { ResolvedFile } from '../host'
+import { format } from '../messages'
 import CanvasMinimap from './CanvasMinimap.vue'
 import MarkdownView from './MarkdownView.vue'
 
@@ -61,14 +62,14 @@ watch(audio, (el) => {
 	<div v-else-if="!file.exists" class="jc-node-content jc-missing jc-interactive">
 		<p>
 			<UIcon name="i-lucide-triangle-alert" class="jc-icon" />
-			“{{ node.file }}” could not be found.
+			{{ format(content.messages().fileNotFound, { file: node.file }) }}
 		</p>
 		<div v-if="!content.readonly()" class="jc-actions">
 			<button v-if="canSwap" type="button" class="jc-pill" @click="interaction.swapFile(item.key)">
-				<UIcon name="i-lucide-repeat" class="jc-icon" />Swap file…
+				<UIcon name="i-lucide-repeat" class="jc-icon" />{{ content.messages().swapFile }}
 			</button>
 			<button type="button" class="jc-pill jc-danger" @click="interaction.remove(item.key)">
-				<UIcon name="i-lucide-trash-2" class="jc-icon" />Remove
+				<UIcon name="i-lucide-trash-2" class="jc-icon" />{{ content.messages().remove }}
 			</button>
 		</div>
 	</div>
@@ -90,7 +91,7 @@ watch(audio, (el) => {
 	<div v-else-if="kind === 'markdown' && text !== null" class="jc-node-content jc-file-markdown">
 		<MarkdownView v-if="section !== undefined" :text="section" />
 		<p v-else-if="text !== undefined" class="jc-note">
-			Couldn't find “{{ node.subpath }}” in this note.
+			{{ format(content.messages().sectionNotFound, { subpath: node.subpath ?? '' }) }}
 		</p>
 	</div>
 	<div v-else-if="kind === 'canvas' && minimap" class="jc-node-content jc-file-canvas" data-open>

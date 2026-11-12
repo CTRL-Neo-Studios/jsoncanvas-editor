@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
+import { CANVAS_CONTENT } from '../composables/useCanvasContent'
 import type { CanvasPrompt } from '../composables/useCanvasInteraction'
 
 /** Asks for a value (a link card's URL); closing without submitting changes nothing. */
 const props = defineProps<{ prompt: CanvasPrompt }>()
 const emit = defineEmits<{ close: [] }>()
+const { cancel, save } = inject(CANVAS_CONTENT)!.messages()
 
 const value = ref(props.prompt.value)
 const touched = ref(false)
@@ -32,8 +34,8 @@ function submit() {
 			</form>
 		</template>
 		<template #footer>
-			<UButton label="Cancel" color="neutral" variant="ghost" @click="emit('close')" />
-			<UButton label="Save" @click="submit" />
+			<UButton :label="cancel" color="neutral" variant="ghost" @click="emit('close')" />
+			<UButton :label="save" @click="submit" />
 		</template>
 	</UModal>
 </template>

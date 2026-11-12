@@ -124,7 +124,7 @@ const backgroundCss = computed(() => background.value && {
 			<div v-else-if="item.kind === 'group'" class="jc-node-content" :style="backgroundCss" />
 			<div v-else-if="item.kind === 'unsupported'" class="jc-node-content jc-unsupported">
 				<UIcon name="i-lucide-triangle-alert" class="jc-icon" />
-				<span>Unsupported node{{ typeof node.type === 'string' ? `: ${node.type}` : '' }}</span>
+				<span>{{ content.messages().unsupportedNode }}{{ typeof node.type === 'string' ? `: ${node.type}` : '' }}</span>
 			</div>
 			<div v-else-if="contentHidden && !alwaysShown && !editing" class="jc-placeholder">
 				<UIcon v-if="item.kind === 'text'" name="i-lucide-align-left" class="jc-placeholder-icon" />

@@ -1,16 +1,18 @@
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
-	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, edgeGeometry, fileKind, gridSpacing, growBBox, intersectsBBox,
+	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, edgeGeometry, gridSpacing, growBBox, intersectsBBox,
 	lockAxis, MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, oppositeSide, pointBox, raiseNodes, removeFromCanvas,
 	resizeBox, resizeSnapSource, scaleBoxes, snap, unionBBox,
-	type BBox, type CanvasEnd, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
+	type BBox, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
 	type ResizeHandle, type SnapGuide,
 } from '../../core'
 import type { CanvasHost, CanvasLink } from '../host'
+import type { CanvasMessages } from '../messages'
 import { colorBinding, type ColorBinding } from '../utils/color'
 import { startDrag, type DragHandlers, type DragPoint } from '../utils/drag'
 import { isCloneKey, isMod, isNoSnapKey } from '../utils/platform'
+import type { CanvasActions, MenuTarget } from './useCanvasActions'
 import type { CanvasEditor, SceneEdge, SceneNode } from './useCanvasEditor'
 
 export interface InteractionOptions {
@@ -20,6 +22,9 @@ export interface InteractionOptions {
 	host: () => CanvasHost | undefined
 	/** Node types drawn by a custom card (`nodeRenderers` or a `#node-<type>` slot); they can be edited too. */
 	customTypes: () => ReadonlySet<string>
+	messages: () => CanvasMessages
+	/** Menus and creation, which need the interaction themselves (so they're looked up when used). */
+	actions: () => CanvasActions
 }
 
 /** An edge being drawn from a node or moved to another. */
@@ -75,8 +80,20 @@ export interface CanvasInteraction {
 	/** The editor's text so far; `finishEditing` saves the last one. */
 	draft: (text: string) => void
 	finishEditing: () => void
+	/** Starts editing an edge's or a group's label. */
+	editLabel: (key: string, at?: LabelEditing['at']) => void
+	/** Opens what a file or link card shows: the file in the host, the page in a browser tab. */
+	openNode: (item: SceneNode, newTab: boolean) => void
 	/** Per node key, bumped by "Reload page" so a link card loads again. */
 	reloads: ShallowRef<ReadonlyMap<string, number>>
+	reload: (key: string) => void
+	/** A drag (move, resize, connect, select, add) is in progress. */
+	dragging: Ref<boolean>
+	/**
+	 * Drags a new card of `size` from outside the canvas (the bottom bar), centred on the pointer and snapped to
+	 * other cards; `drop` gets its box when released over the canvas, `click` runs for a press without a drag.
+	 */
+	dragNew: (e: PointerEvent, size: { width: number, height: number }, drop: (box: BBox) => void, click: () => void) => void
 	/** Lets the user pick another file for a file card. */
 	swapFile: (key: string) => void
 	/** Saves `patch` into the node at `key`; a key set to `undefined` is removed. */
@@ -107,13 +124,6 @@ const NUDGE_MULTIPLIER = 5
 const MAX_LINKS = 20
 const NO_COLOR = colorBinding(undefined)
 
-/** Line directions, by the ends they give an edge. */
-const DIRECTIONS: Array<{ label: string, fromEnd: CanvasEnd, toEnd: CanvasEnd }> = [
-	{ label: 'Nondirectional', fromEnd: 'none', toEnd: 'none' },
-	{ label: 'Unidirectional', fromEnd: 'none', toEnd: 'arrow' },
-	{ label: 'Bidirectional', fromEnd: 'arrow', toEnd: 'arrow' },
-]
-
 /** A node side an edge end can attach to. */
 interface Attachment {
 	node: SceneNode
@@ -128,21 +138,6 @@ const width = (b: BBox) => b.maxX - b.minX
 const height = (b: BBox) => b.maxY - b.minY
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 const linkKey = (l: { file?: unknown, subpath?: unknown }) => `${l.file}${l.subpath ?? ''}`
-
-/**
- * `edge` with the ends a line direction gives it, keys in the order Obsidian writes them (ends before color and
- * label); defaults (`fromEnd: none`, `toEnd: arrow`) left out.
- */
-function withEnds(edge: JSONCanvasEdge, fromEnd: CanvasEnd, toEnd: CanvasEnd): JSONCanvasEdge {
-	const { fromEnd: _from, toEnd: _to, color, label, ...rest } = edge
-	return {
-		...rest,
-		...(fromEnd !== 'none' && { fromEnd }),
-		...(toEnd !== 'arrow' && { toEnd }),
-		...(color !== undefined && { color }),
-		...(label !== undefined && { label }),
-	}
-}
 
 /** `doc` with the nodes at `indices` set to `boxes` (rounded, as Obsidian stores them). */
 function placed(doc: JSONCanvas, indices: readonly number[], boxes: readonly BBox[]): JSONCanvas {
@@ -236,6 +231,25 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		})
 		guides.value = r.guides
 		return { x: d.x + r.dx, y: d.y + r.dy }
+	}
+
+	function dragNew(e: PointerEvent, size: { width: number, height: number }, drop: (box: BBox) => void, click: () => void) {
+		let box: BBox | undefined
+		drag(e, () => ({
+			move(p) {
+				const w = world(p)
+				const b = { minX: w.x - size.width / 2, minY: w.y - size.height / 2, maxX: w.x + size.width / 2, maxY: w.y + size.height / 2 }
+				// Cards snap to cards, as when moved.
+				const targets = editor.visibleNodes.value.filter(n => n.kind !== 'group').map(n => n.box)
+				box = translate(b, snapped([b], { x: 0, y: 0 }, targets, p))
+				ghosts.value = [box]
+			},
+			end(p) {
+				const r = autoPan.rect()
+				if (box && p.clientX >= r.left && p.clientX <= r.left + r.width && p.clientY >= r.top && p.clientY <= r.top + r.height) drop(box)
+			},
+			cancel() {},
+		}), click)
 	}
 
 	/** The selection plus every node fully inside a selected group: what a move carries. */
@@ -339,8 +353,12 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 				}
 				editor.select(result)
 			},
-			end: () => {
-				marquee.value = undefined
+			end: (p) => {
+				const rect = marquee.value
+				// Mod at release: create something the drawn size (or offer a menu of things) instead.
+				const items = rect && isMod(p) && !o.readonly() ? o.actions().createWithSize(rect) : undefined
+				if (items) menu.value = { ...local(p), items: [items], onClose: () => (marquee.value = undefined) }
+				else marquee.value = undefined
 			},
 			cancel: () => {
 				marquee.value = undefined
@@ -429,9 +447,9 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 			}
 		}
 		const { pickFile } = host ?? {}
-		const actions: DropdownMenuItem[] = [{ label: 'Add card', icon: 'i-lucide-sticky-note', onSelect: add(() => ({ type: 'text', text: '' })) }]
+		const actions: DropdownMenuItem[] = [{ label: o.messages().addCard, icon: 'i-lucide-sticky-note', onSelect: add(() => ({ type: 'text', text: '' })) }]
 		if (pickFile) {
-			actions.push({ label: 'Add file', icon: 'i-lucide-file-plus', onSelect: add(async () => {
+			actions.push({ label: o.messages().addFile, icon: 'i-lucide-file-plus', onSelect: add(async () => {
 				const file = await pickFile()
 				return file ? { type: 'file', file } : undefined
 			}) })
@@ -587,7 +605,11 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		}
 		const key = target.closest<HTMLElement>('[data-key]')?.dataset.key
 		const item = key ? scene.value.byKey.get(key) : undefined
-		if (!item) return
+		if (!item) {
+			// On empty canvas: a new card, being edited.
+			if (!o.readonly() && !target.closest('[data-edge], .jc-chrome')) o.actions().add('card', { at: world(e), center: true })
+			return
+		}
 		if (target.closest('.jc-group-label')) editLabel(item.key)
 		else if (target.closest('.jc-node-label')) openNode(item, false)
 		else if (item.kind === 'text' || o.customTypes().has(String(item.node.type))) startEditing(item.key)
@@ -611,48 +633,6 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		reloads.value = next
 	}
 
-	function changeUrl(item: SceneNode) {
-		prompt.value = {
-			title: 'Enter URL',
-			value: item.node.url as string,
-			validate: (v) => {
-				try {
-					new URL(v)
-				}
-				catch {
-					return 'Invalid URL'
-				}
-			},
-			submit: (url) => {
-				const doc = editor.canvas.value
-				editor.commit({ ...doc, nodes: doc.nodes!.map(n => (n === item.node ? { ...n, url } : n)) })
-			},
-		}
-	}
-
-	/** A card's own items in its context menu. */
-	function nodeMenu(item: SceneNode): DropdownMenuItem[] {
-		const edit = !o.readonly(), host = o.host(), n = item.node
-		const items: Array<DropdownMenuItem | false | undefined> = item.kind === 'text'
-			? [edit && { label: 'Edit', icon: 'i-lucide-pencil', onSelect: () => startEditing(item.key) }]
-			: item.kind === 'group'
-				? [edit && { label: 'Edit label', icon: 'i-lucide-pencil', onSelect: () => editLabel(item.key) }]
-				: item.kind === 'file'
-					? [
-							edit && !!host?.pickFile && { label: 'Swap file', icon: 'i-lucide-repeat', onSelect: () => swapFile(item.key) },
-							!!host?.openFile && fileKind(n.file as string) === 'markdown' && { label: 'Open in new tab', icon: 'i-lucide-file-plus', onSelect: () => openNode(item, true) },
-						]
-					: item.kind === 'link'
-						? [
-								edit && { label: 'Change URL', icon: 'i-lucide-link', onSelect: () => changeUrl(item) },
-								{ label: 'Open in browser', icon: 'i-lucide-globe', onSelect: () => openNode(item, true) },
-								{ label: 'Copy URL', icon: 'i-lucide-copy', onSelect: () => void navigator.clipboard.writeText(n.url as string) },
-								{ label: 'Reload page', icon: 'i-lucide-rotate-ccw', onSelect: () => reload(item.key) },
-							]
-						: []
-		return items.filter(i => !!i)
-	}
-
 	/** A click on an edge (or its label, `at`) selects it; on the only selected edge, edits its label. */
 	function clickEdge(key: string, p: DragPoint, at?: LabelEditing['at']) {
 		const sel = editor.selected.value
@@ -661,61 +641,28 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		else editor.select([key])
 	}
 
-	function setLineDirection(edges: readonly JSONCanvasEdge[], fromEnd: CanvasEnd, toEnd: CanvasEnd) {
-		const doc = editor.canvas.value
-		editor.commit({ ...doc, edges: doc.edges!.map(e => (edges.includes(e as JSONCanvasEdge) ? withEnds(e as JSONCanvasEdge, fromEnd, toEnd) : e)) })
-	}
-
 	function onContextMenu(e: MouseEvent) {
 		const target = e.target as Element
-		if (target.closest(INTERACTIVE)) return
+		if (target.closest(INTERACTIVE) || target.closest('.jc-chrome')) return
+		e.preventDefault()
 		const sel = editor.selected.value
 		const nodeKey = target.closest<HTMLElement>('[data-key]')?.dataset.key
-		const node = nodeKey ? scene.value.byKey.get(nodeKey) : undefined
-		if (node) {
-			e.preventDefault()
-			// ponytail: a node in a multi-selection gets no menu, nor any node Zoom/Remove items, until C6's menus.
-			if (sel.size > 1 && sel.has(node.key)) return
-			if (!o.readonly()) editor.select([node.key])
-			const items = nodeMenu(node)
-			if (items.length) menu.value = { ...local(e), items: [items] }
-			return
+		const edgeKey = nodeKey === undefined ? target.closest<HTMLElement>('[data-edge]')?.dataset.edge : undefined
+		const key = nodeKey ?? edgeKey
+		let kind: MenuTarget['kind']
+		if (target.closest('.jc-selection') || (key !== undefined && sel.size > 1 && sel.has(key))) {
+			kind = 'selection'
 		}
-		const key = target.closest<HTMLElement>('[data-edge]')?.dataset.edge
-		const item = key && scene.value.edgeByKey.get(key)
-		if (!item) return
-		e.preventDefault()
-		// ponytail: an edge in a multi-selection gets no menu until the selection menu (C6).
-		if (editor.selected.value.size > 1 && editor.selected.value.has(key)) return
-		const edit = !o.readonly()
-		if (edit) editor.select([key])
-		const { edge } = item
-		const at = world(e)
-		const far = distance(at, item.shape.start) < distance(at, item.shape.end) ? item.to : item.from
-		const follow: DropdownMenuItem = { label: 'Follow connection', icon: 'i-lucide-corner-down-right', onSelect: () => viewport.zoomToBBox(far) }
-		const fromEnd = edge.fromEnd ?? 'none', toEnd = edge.toEnd ?? 'arrow'
-		menu.value = {
-			...local(e),
-			items: edit
-				? [
-						[
-							{ label: 'Edit label', icon: 'i-lucide-pencil', onSelect: () => editLabel(key) },
-							{
-								label: 'Line direction',
-								icon: 'i-lucide-move-horizontal',
-								children: DIRECTIONS.map(d => ({
-									label: d.label,
-									type: 'checkbox' as const,
-									checked: d.fromEnd === fromEnd && d.toEnd === toEnd,
-									onSelect: () => setLineDirection([edge], d.fromEnd, d.toEnd),
-								})),
-							},
-							follow,
-						],
-						[{ label: 'Remove', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => remove(new Set(), new Set([edge])) }],
-					]
-				: [[follow]],
+		else if (key !== undefined && (nodeKey === undefined ? scene.value.edgeByKey.has(key) : scene.value.byKey.has(key))) {
+			kind = nodeKey === undefined ? 'edge' : 'node'
+			editor.select([key])
 		}
+		else {
+			kind = 'canvas'
+			editor.select([])
+		}
+		const items = o.actions().menu({ kind, key, at: world(e) })
+		if (items.length) menu.value = { ...local(e), items }
 	}
 
 	function closeMenu() {
@@ -847,7 +794,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 
 	return {
 		hovered, handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEditing, finishLabel, menu, closeMenu,
-		editing, startEditing, finishEditing, reloads, swapFile, prompt,
+		editing, startEditing, finishEditing, reloads, reload, swapFile, prompt, editLabel, openNode, dragging, dragNew,
 		updateNode(key, patch) {
 			const item = scene.value.byKey.get(key)
 			if (!item || o.readonly()) return

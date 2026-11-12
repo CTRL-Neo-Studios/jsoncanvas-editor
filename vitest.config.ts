@@ -9,6 +9,8 @@ export default defineConfig({
 			// Nuxt UI's components need its Vite plugin and app config; tests don't look at icons, and menus are stand-ins.
 			'@nuxt/ui/components/Icon.vue': fileURLToPath(new URL('./test/stubs/IconStub.vue', import.meta.url)),
 			'@nuxt/ui/components/DropdownMenu.vue': fileURLToPath(new URL('./test/stubs/DropdownMenuStub.vue', import.meta.url)),
+			'@nuxt/ui/components/Button.vue': fileURLToPath(new URL('./test/stubs/ButtonStub.vue', import.meta.url)),
+			'@nuxt/ui/components/Tooltip.vue': fileURLToPath(new URL('./test/stubs/TooltipStub.vue', import.meta.url)),
 		},
 	},
 	test: {

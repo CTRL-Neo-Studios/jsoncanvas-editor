@@ -72,6 +72,8 @@ watch(choice, (c) => {
 const viewport = ref<Viewport>()
 
 const host = createVaultHost()
+/** The sticky card (drawn by the `#node-sticky` slot below), offered in the bottom bar and the add menus. */
+const cardTemplates = [{ label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: 'New sticky', color: '3', width: 250, height: 160 } }]
 const editor = useTemplateRef('editor')
 
 // For scripted checks (screenshots, frame timing).
@@ -88,16 +90,18 @@ onMounted(() => {
 				{{ viewport ? `x ${viewport.x.toFixed(0)} · y ${viewport.y.toFixed(0)} · zoom ${viewport.zoom.toFixed(2)}` : '' }}
 			</span>
 			<UButton size="sm" variant="outline" label="Zoom to fit" @click="editor?.zoomToFit()" />
-			<UButton
-				size="sm"
-				variant="outline"
-				label="Add sticky"
-				@click="editor?.addNode({ type: 'sticky', note: 'New sticky', ...editor.screenToWorld({ clientX: 400, clientY: 300 }), width: 250, height: 160 })"
-			/>
 			<span class="text-muted">{{ editor?.issues.length ? `${editor.issues.length} issue(s)` : '' }}</span>
 		</div>
 		<div class="flex-1 min-h-0">
-			<JsonCanvas :key="choice" ref="editor" v-model="canvas" v-model:viewport="viewport" :host="host" :file-renderers="{ base: BaseCard }">
+			<JsonCanvas
+				:key="choice"
+				ref="editor"
+				v-model="canvas"
+				v-model:viewport="viewport"
+				:host="host"
+				:file-renderers="{ base: BaseCard }"
+				:card-templates="cardTemplates"
+			>
 				<!-- A card for a node type of our own: shows `note`, edits it on double-click. -->
 				<template #node-sticky="{ node, editing, update, done }">
 					<textarea

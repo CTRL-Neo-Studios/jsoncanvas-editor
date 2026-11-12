@@ -47,11 +47,11 @@ const parse = createSerializedMarkdownParser({
 const cache = new Map<string, Promise<MarkdownDocument>>()
 const CACHE_SIZE = 500
 
-/** `text` parsed, cached, so cards scrolled back into view render at once. */
+/** `text` parsed, cached, so cards scrolled back into view render at once. Block ids (` ^id` at a line's end) are hidden, as in Obsidian. */
 export function parseMarkdown(text: string): Promise<MarkdownDocument> {
 	let doc = cache.get(text)
 	if (!doc) {
-		doc = parse(text)
+		doc = parse(text.replace(/ \^[\w-]+$/gm, ''))
 		if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value!)
 		cache.set(text, doc)
 	}

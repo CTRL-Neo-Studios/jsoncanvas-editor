@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useTemplateRef, watch } from 'vue'
+import { inject, useTemplateRef, watch } from 'vue'
+import { CANVAS_CONTENT } from '../composables/useCanvasContent'
 import type { SceneEdge } from '../composables/useCanvasEditor'
 import type { LabelEditing } from '../composables/useCanvasInteraction'
 import { focusCanvas, startInlineEdit } from '../utils/inline-edit'
@@ -10,6 +11,7 @@ const props = defineProps<{
 	editing?: LabelEditing
 }>()
 const emit = defineEmits<{ done: [text: string] }>()
+const content = inject(CANVAS_CONTENT)!
 
 const input = useTemplateRef<HTMLDivElement>('input')
 watch(input, (el) => {
@@ -30,7 +32,7 @@ watch(input, (el) => {
 			class="jc-edge-label-text"
 			contenteditable="plaintext-only"
 			spellcheck="false"
-			data-placeholder="Add text"
+			:data-placeholder="content.messages().addLabel"
 			@blur="emit('done', ($event.target as HTMLElement).innerText)"
 			@keydown.escape="focusCanvas($event.target as Element)"
 		/>

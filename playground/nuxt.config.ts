@@ -8,4 +8,6 @@ export default defineNuxtConfig({
   alias: { '@type32/jsoncanvas-editor': fileURLToPath(new URL('../src/runtime', import.meta.url)) },
   // The folder `/vault/<path>` serves files from: `JC_VAULT`, else the test vault.
   runtimeConfig: { vaultRoot: process.env.JC_VAULT || fileURLToPath(new URL('../test/fixtures/vault', import.meta.url)) },
+  // The sources import these from the repo's node_modules; one copy each, so Nuxt UI's providers reach the canvas.
+  vite: { resolve: { dedupe: ['vue', '@nuxt/ui', 'reka-ui', '@vueuse/core'] } },
 })
