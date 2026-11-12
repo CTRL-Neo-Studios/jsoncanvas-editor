@@ -9,5 +9,9 @@ export default defineNuxtConfig({
   // The folder `/vault/<path>` serves files from: `JC_VAULT`, else the test vault.
   runtimeConfig: { vaultRoot: process.env.JC_VAULT || fileURLToPath(new URL('../test/fixtures/vault', import.meta.url)) },
   // The sources import these from the repo's node_modules; one copy each, so Nuxt UI's providers reach the canvas.
-  vite: { resolve: { dedupe: ['vue', '@nuxt/ui', 'reka-ui', '@vueuse/core'] } },
+  // `JC_PROFILE=1` builds without minifying, so profiles name functions.
+  vite: {
+    resolve: { dedupe: ['vue', '@nuxt/ui', 'reka-ui', '@vueuse/core'] },
+    ...(process.env.JC_PROFILE && { build: { minify: false } }),
+  },
 })

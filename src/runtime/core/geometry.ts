@@ -168,3 +168,20 @@ export function bezierPoint({ from, cp1, cp2, to }: Bezier, t: number): Point {
 		y: w[0] * from.y + w[1] * cp1.y + w[2] * cp2.y + w[3] * to.y,
 	}
 }
+
+/** About how far `p` is from `curve`: the distance to the polyline through `samples + 1` points along it. */
+export function curveDistance(curve: Bezier, p: Point, samples = 16): number {
+	let best = Infinity, prev = curve.from
+	for (let i = 1; i <= samples; i++) {
+		const next = bezierPoint(curve, i / samples)
+		best = Math.min(best, segmentDistance(p, prev, next))
+		prev = next
+	}
+	return best
+}
+
+function segmentDistance(p: Point, a: Point, b: Point): number {
+	const dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy
+	const t = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0
+	return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}

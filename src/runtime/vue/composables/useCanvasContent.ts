@@ -54,6 +54,10 @@ export interface CanvasContent {
 
 export const CANVAS_CONTENT: InjectionKey<CanvasContent> = Symbol('jc-content')
 
+const ON_SERVER = typeof window === 'undefined'
+/** What a server's file loads wait on: nothing, ever (the page is rendered and thrown away). */
+const NEVER = new Promise<never>(() => {})
+
 export interface CanvasContentOptions {
 	host: () => CanvasHost | undefined
 	fileRenderers: () => FileRenderers | undefined
@@ -105,12 +109,15 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 		messages: o.messages,
 		interaction,
 		fileVersion,
-		resolveFile: path => cached(files, path, () => o.host()?.resolveFile?.(path) ?? { exists: true }),
-		readText: path => cached(texts, path, () => {
-			const read = o.host()?.readText
-			if (!read) throw new Error('The host can\'t read files')
-			return read(path)
-		}),
+		// On a server (SSR) the host isn't asked: cards render empty there and load in the browser.
+		resolveFile: path => (ON_SERVER ? NEVER : cached(files, path, () => o.host()?.resolveFile?.(path) ?? { exists: true })),
+		readText: path => (ON_SERVER
+			? NEVER
+			: cached(texts, path, () => {
+					const read = o.host()?.readText
+					if (!read) throw new Error('The host can\'t read files')
+					return read(path)
+				})),
 		refreshFiles(paths) {
 			for (const cache of [files, texts]) {
 				if (!paths) cache.clear()

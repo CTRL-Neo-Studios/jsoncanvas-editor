@@ -36,7 +36,7 @@ export function canvasMinimap(canvas: JSONCanvas): CanvasMinimap | undefined {
 	const byId = new Map<unknown, BBox | undefined>()
 	for (const node of canvas.nodes ?? []) {
 		const box = nodeBox(node)
-		if (!byId.has(node.id)) byId.set(node.id, box)
+		if (typeof node === 'object' && node !== null && !byId.has(node.id)) byId.set(node.id, box)
 		if (!box) continue
 		all.push(box)
 		;(isSupportedNode(node) && node.type === 'group' ? groups : nodes).push({ ...rectOf(box), ...colorOf(node) })

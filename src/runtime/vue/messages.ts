@@ -60,6 +60,7 @@ export const MESSAGES = {
 	fileNotFound: '“{file}” could not be found.',
 	sectionNotFound: 'Couldn’t find “{subpath}” in this note.',
 	unsupportedNode: 'Unsupported node',
+	cardFailed: 'This card couldn’t be shown.',
 	// Canvas
 	undo: 'Undo',
 	redo: 'Redo',
@@ -90,6 +91,7 @@ export const MESSAGES = {
 	showWatermarkDescription: 'This will add the watermark to the bottom left.',
 	privacyMode: 'Privacy mode',
 	privacyModeDescription: 'This will obscure any text on your canvas.',
+	exportFailed: 'The image couldn’t be made or saved. Try a lower zoom.',
 	// Help
 	helpPan: 'Pan',
 	helpPanHorizontally: 'Pan horizontally',

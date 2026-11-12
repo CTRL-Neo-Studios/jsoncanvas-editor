@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, h, nextTick, type VNode } from 'vue'
+import { defineComponent, h, nextTick, useTemplateRef, type VNode } from 'vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { JSONCanvas, JSONCanvasEdge, JSONCanvasNode } from '../src/runtime/core'
 import CanvasMenu from '../src/runtime/vue/components/CanvasMenu.vue'
@@ -8,22 +8,24 @@ import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
 import { IS_MAC } from '../src/runtime/vue/utils/platform'
 import DropdownMenuStub from './stubs/DropdownMenuStub.vue'
 
-/** What an export handed to `modern-screenshot`, read when it was handed over (the export DOM goes right after). */
-const captures = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>, keys: string[], placeholders: string[], frames: number, redacted: string[], watermark?: string }>)
-vi.mock('modern-screenshot', () => ({
-	createContext: async (root: Element, options: Record<string, unknown>) => {
+/** What an export handed to the capture, read when it was handed over (the export DOM goes right after). */
+const captures = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>, keys: string[], placeholders: string[], frames: number, redacted: string[], redactedLive: number, watermark?: string }>)
+vi.mock('../src/runtime/vue/utils/capture', () => ({
+	// happy-dom can't draw: the capture's own part (an SVG of the page's CSS and a copy) is checked in a browser.
+	captureElement: async (root: HTMLElement, { transform, context: _, ...options }: { transform?: (copy: HTMLElement) => void, context: Element }) => {
+		const copy = root.cloneNode(true) as HTMLElement
+		transform?.(copy)
 		captures.push({
 			options,
 			keys: [...root.querySelectorAll<HTMLElement>('[data-key]')].map(n => n.dataset.key!),
 			placeholders: [...root.querySelectorAll<HTMLElement>('[data-key]:has(.jc-placeholder)')].map(n => n.dataset.key!),
 			frames: root.querySelectorAll('iframe').length,
-			redacted: [...root.querySelectorAll('.jc-redacted')].map(w => w.textContent!),
-			watermark: root.querySelector('.jc-watermark')?.textContent ?? undefined,
+			redacted: [...copy.querySelectorAll('.jc-redacted')].map(w => w.textContent!),
+			redactedLive: root.querySelectorAll('.jc-redacted').length,
+			watermark: copy.querySelector('.jc-watermark')?.textContent ?? undefined,
 		})
-		return {}
+		return new Blob(['png'], { type: 'image/png' })
 	},
-	domToBlob: async () => new Blob(['png'], { type: 'image/png' }),
-	destroyContext: () => {},
 }))
 
 /** The view is 1000 × 800 and centred on the world origin at 100%: client = world + (500, 400). */
@@ -74,7 +76,7 @@ const root = () => wrapper.find('.jc-canvas').element
 const nodeEl = (key: string) => wrapper.find(`[data-key="${key}"] .jc-node-container`).element
 const doc = () => wrapper.vm.canvas as JSONCanvas
 const box = (id: string) => {
-	const n = doc().nodes!.find(n => n.id === id) as JSONCanvasNode
+	const n = doc().nodes!.find(n => n?.id === id) as JSONCanvasNode
 	return [n.x, n.y, n.width, n.height]
 }
 const emits = () => wrapper.emitted('update:modelValue')?.length ?? 0
@@ -191,12 +193,19 @@ describe('moving', () => {
 		expect(selected()).toEqual([copy.id])
 	})
 
-	it('cancels with Esc', async () => {
-		await setup({ nodes: [card('a', 0, 0)] })
+	it('draws a move at an offset until it ends, and cancels with Esc', async () => {
+		await setup({ nodes: [card('a', 0, 0), card('b', 300, 0)], edges: [{ id: 'e', fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'left' }] })
+		const world = () => wrapper.find('.jc-world').element as HTMLElement
 		await drag(nodeEl('a'), [[10, 10], [60, 10], [110, 10]], {}, true)
-		expect(box('a')[0]).toBe(100)
+		// The document is untouched mid-drag; the card is drawn at the offset, its edge reshaped.
+		expect(box('a')[0]).toBe(0)
+		expect(world().style.getPropertyValue('--jc-move-x')).toBe('100px')
+		expect(wrapper.find('[data-key="a"]').classes()).toContain('jc-moved')
+		expect(wrapper.find('[data-edge="e"] .jc-edge-line').attributes('d')).toMatch(/^M200 25/)
 		await key('Escape')
 		expect(box('a')[0]).toBe(0)
+		expect(wrapper.find('[data-key="a"]').classes()).not.toContain('jc-moved')
+		expect(wrapper.find('[data-edge="e"] .jc-edge-line').attributes('d')).toMatch(/^M100 25/)
 		expect(emits()).toBe(0)
 	})
 })
@@ -721,11 +730,166 @@ describe('export', () => {
 		expect(c.keys.sort()).toEqual(['a', 'far', 'l'])
 		expect([c.placeholders, c.frames]).toEqual([['l'], 0])
 		expect(c.redacted).toEqual(expect.arrayContaining(['far', 'https://example.com', 'Logo']))
+		expect(c.redactedLive).toBe(0) // privacy changes the copy drawn, not the page
 		expect(c.watermark).toBe('Logo')
 		await nextTick()
 		expect(wrapper.find('.jc-export-host').exists()).toBe(false)
 
 		await wrapper.vm.exportPng({ frame: 'viewport', watermark: false })
 		expect(captures.at(-1)).toMatchObject({ options: { width: W, height: H, scale: 1 }, redacted: [], watermark: undefined })
+	})
+})
+
+describe('hostile canvases', () => {
+	it('draws what it can of a document with anything in it, edits it, and keeps the rest', async () => {
+		const junk = [null, 7, 'x', []]
+		await setup({
+			nodes: [
+				...junk,
+				card('a', 0, 0),
+				{ id: 'huge', type: 'text', text: '', x: 1e308, y: 0, width: 10, height: 10 },
+				{ id: 'negative', type: 'text', text: '', x: 0, y: 0, width: -5, height: 10 },
+				{ id: 's', type: 'shape', x: 300, y: 0, width: 100, height: 50 },
+				card('a', 600, 0),
+			] as JSONCanvas['nodes'],
+			edges: [null, { id: 'e', fromNode: 'a', toNode: 'gone' }, { id: 'f', fromNode: 'a', fromSide: 'right', toNode: 's', toSide: 'left' }] as JSONCanvas['edges'],
+		})
+		// Drawn: both `a`s (the second keyed apart), the unsupported shape and the edge to it.
+		expect(wrapper.findAll('.jc-world [data-key]').map(n => n.attributes('data-key')).sort()).toEqual(['a', 'a#8', 's'])
+		expect(wrapper.find('[data-edge="f"]').exists()).toBe(true)
+		wrapper.vm.select(['a'])
+		await key('ArrowRight')
+		await key('Delete')
+		expect(doc().nodes!.slice(0, 4)).toEqual(junk)
+		expect(doc().nodes!.map(n => (n as { id?: string } | null)?.id)).toEqual([undefined, undefined, undefined, undefined, 'huge', 'negative', 's', 'a'])
+		// The other `a` still has the id, so the edges from it stay; so does the `null`.
+		expect(doc().edges!.map(e => (e as { id?: string } | null)?.id)).toEqual([undefined, 'e', 'f'])
+		// Both edits came within the history's 250 ms: one step back restores the document.
+		wrapper.vm.undo()
+		expect([doc().nodes!.length, box('a')[0]]).toEqual([9, 0])
+	})
+
+	it('reports a host that fails everywhere, and goes on without it', async () => {
+		const fail = () => {
+			throw new Error('no')
+		}
+		const errors: string[] = []
+		await setup({ nodes: [{ id: 'f', type: 'file', file: 'Notes/a.md', x: 0, y: 0, width: 400, height: 400 }] }, {
+			host: {
+				resolveFile: fail,
+				readText: async () => 42,
+				pickFile: async () => fail(),
+				importFiles: async () => 'not a list',
+				filesIn: fail,
+				listLinks: async () => null,
+			},
+			onError: (e: { action: string }) => errors.push(e.action),
+		})
+		await flushPromises()
+		// No file information, no text: a generic card with the file's name.
+		expect(wrapper.find('[data-key="f"] .jc-card-name').text()).toBe('a.md')
+		wrapper.vm.actions.add('file', { at: { x: 0, y: 600 } })
+		const files = new DataTransfer()
+		files.items.add(new File(['x'], 'p.png', { type: 'image/png' }))
+		;(root() as HTMLElement).focus()
+		document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: files, bubbles: true, cancelable: true }))
+		await flushPromises()
+		expect(doc().nodes).toHaveLength(1)
+		expect([...new Set(errors)].sort()).toEqual(['filesIn', 'importFiles', 'pickFile', 'readText', 'resolveFile'])
+	})
+
+	it('shows a card that throws as failed, keeps the rest, and refuses updates that would break a node', async () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const Boom = defineComponent(() => {
+			throw new Error('boom')
+		})
+		let update!: (patch: unknown) => void
+		await setup(
+			{ nodes: [{ id: 'b', type: 'boom', x: 0, y: 0, width: 100, height: 100 }, { id: 's', type: 'sticky', note: 'n', x: 200, y: 0, width: 100, height: 100 }, card('a', 400, 0)] },
+			{ nodeRenderers: { boom: Boom } },
+			{ 'node-sticky': (p) => {
+				update = (p as unknown as { update: (patch: unknown) => void }).update
+				return [h('p', String(p.node.note))]
+			} },
+		)
+		expect(wrapper.find('[data-key="b"]').text()).toContain('This card couldn’t be shown.')
+		expect(error).toHaveBeenCalled()
+		expect(wrapper.find('[data-key="a"]').exists()).toBe(true)
+		for (const bad of ['nope', null, [], { id: 'other' }, { width: -1 }, { x: Number.NaN }]) update(bad)
+		expect(emits()).toBe(0)
+		update({ note: 'kept' })
+		expect(doc().nodes![1]).toMatchObject({ id: 's', note: 'kept' })
+		error.mockRestore()
+	})
+})
+
+it('settles when a parent passes `nodeRenderers` inline and shows `issues`', async () => {
+	// Each render of the parent makes a new `nodeRenderers` object; the canvas must not answer with new `issues`.
+	let renders = 0
+	const doc: JSONCanvas = { nodes: [{ id: 'c', type: 'custom', x: 0, y: 0, width: 100, height: 100 }, { id: 'u', type: 'unknown', x: 200, y: 0, width: 100, height: 100 }], edges: [] }
+	const Parent = defineComponent({
+		setup() {
+			const canvas = useTemplateRef<InstanceType<typeof JsonCanvas>>('canvas')
+			return () => {
+				renders++
+				return h('div', [
+					h('span', String(canvas.value?.issues.length ?? '')),
+					h(JsonCanvas, { ref: 'canvas', modelValue: doc, nodeRenderers: { custom: () => h('p', 'custom') } }),
+				])
+			}
+		},
+	})
+	const parent = mount(Parent, { attachTo: document.body })
+	await frame()
+	await frame()
+	await flushPromises()
+	expect(parent.find('span').text()).toBe('1')
+	expect(renders).toBeLessThan(10)
+	parent.unmount()
+})
+
+describe('lifecycle', () => {
+	it('leaves no listeners behind, even when unmounted mid-drag', async () => {
+		const live = new Map<string, number>()
+		const spies = [window, document].flatMap((target) => {
+			const add = target.addEventListener.bind(target), remove = target.removeEventListener.bind(target)
+			return [
+				vi.spyOn(target, 'addEventListener').mockImplementation((type: string, ...rest: unknown[]) => {
+					live.set(type, (live.get(type) ?? 0) + 1)
+					add(type, ...(rest as [EventListener]))
+				}),
+				vi.spyOn(target, 'removeEventListener').mockImplementation((type: string, ...rest: unknown[]) => {
+					live.set(type, (live.get(type) ?? 0) - 1)
+					remove(type, ...(rest as [EventListener]))
+				}),
+			]
+		})
+		for (let i = 0; i < 20; i++) {
+			await setup({ nodes: [card('a', 0, 0)] })
+			await drag(nodeEl('a'), [[10, 10], [60, 10]], {}, true)
+			wrapper.unmount()
+		}
+		// Whatever the pointer does now reaches no canvas.
+		pointer('pointermove', window, 100, 10)
+		pointer('pointerup', window, 100, 10)
+		spies.forEach(s => s.mockRestore())
+		expect([...live].filter(([, n]) => n !== 0)).toEqual([])
+	})
+
+	it('keeps two canvases on one page apart', async () => {
+		const other = mount(JsonCanvas, { attachTo: document.body, props: { modelValue: { nodes: [card('b', 0, 0)], edges: [] } } })
+		await setup({ nodes: [card('a', 0, 0)] })
+		await frame()
+		wrapper.vm.select(['a'])
+		other.vm.select(['b'])
+		await key('Delete')
+		expect(doc().nodes).toEqual([])
+		expect((other.vm.canvas as JSONCanvas).nodes).toHaveLength(1)
+		// Copy goes to the focused one only.
+		;(other.find('.jc-canvas').element as HTMLElement).focus()
+		const data = new DataTransfer()
+		document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }))
+		expect(JSON.parse(data.getData('text/plain')).nodes.map((n: { text: string }) => n.text)).toEqual(['b'])
+		other.unmount()
 	})
 })

@@ -2,6 +2,7 @@
 // Files come from `test/fixtures/vault`, served at `/vault/<path>`; to browse your own vault instead:
 // `JC_VAULT=/path/to/vault bun run dev`, or Open folder (Chromium), which also saves canvases back to it.
 import { parseCanvas, stringifyCanvas, type CanvasSide, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
+import type { CanvasError } from '@type32/jsoncanvas-editor/vue'
 import BaseCard from '~/components/BaseCard.vue'
 import demo from '../../../test/fixtures/obsidian-demo.canvas?raw'
 import sample from '../../../test/fixtures/spec-sample.canvas?raw'
@@ -70,6 +71,8 @@ const canvases: Record<string, () => JSONCanvas> = {
 	'1,000 nodes': () => stress(1000),
 	// `?canvas=Stress&nodes=5000&edges=20000`
 	'Stress': () => stress(Number(useRoute().query.nodes) || 5000, Number(useRoute().query.edges) || 0),
+	// Broken on purpose, with a host that fails at everything and a card that can't be drawn.
+	'Chaos': chaosCanvas,
 }
 const route = useRoute()
 const toast = useToast()
@@ -120,7 +123,11 @@ const source = computed(() => (folder.value && shownPath.value ? `${folder.value
 watch(source, () => (viewport.value = undefined))
 
 const vaultHost = createVaultHost()
-const host = computed(() => folder.value?.host ?? vaultHost)
+const host = computed(() => folder.value?.host ?? (choice.value === 'Chaos' ? chaosHost : vaultHost))
+/** Host failures, one toast per kind. */
+function onError(e: CanvasError) {
+	toast.add({ id: e.action, title: `host.${e.action} failed`, description: String(e.error), color: 'warning' })
+}
 /** The sticky card (drawn by the `#node-sticky` slot below), offered in the bottom bar and the add menus. */
 const cardTemplates = [{ label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: 'New sticky', color: '3', width: 250, height: 160 } }]
 const editor = useTemplateRef('editor')
@@ -151,7 +158,9 @@ onMounted(() => {
 				v-model:viewport="viewport"
 				:host="host"
 				:file-renderers="{ base: BaseCard }"
+				:node-renderers="{ boom: BoomCard }"
 				:card-templates="cardTemplates"
+				@error="onError"
 			>
 				<!-- A card for a node type of our own: shows `note`, edits it on double-click. -->
 				<template #node-sticky="{ node, editing, update, done }">

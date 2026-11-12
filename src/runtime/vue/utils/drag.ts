@@ -37,7 +37,7 @@ const point = (e: PointerEvent | KeyboardEvent, at: DragPoint): DragPoint =>
  * release is a click. Modifier presses re-run `move`, so they apply without moving the pointer. With `autoPan`,
  * holding the pointer within 30 px of the view's edge pans it.
  */
-export function startDrag(down: PointerEvent, h: DragHandlers, autoPan?: AutoPan): void {
+export function startDrag(down: PointerEvent, h: DragHandlers, autoPan?: AutoPan): () => void {
 	let last = point(down, down as unknown as DragPoint)
 	let started = false
 	let timer: ReturnType<typeof setInterval> | undefined
@@ -103,4 +103,6 @@ export function startDrag(down: PointerEvent, h: DragHandlers, autoPan?: AutoPan
 	window.addEventListener('contextmenu', onCancel)
 	window.addEventListener('keydown', onKey)
 	window.addEventListener('keyup', onKey)
+	// Stops listening without ending or cancelling: what's left of a drag when its canvas goes away.
+	return cleanup
 }

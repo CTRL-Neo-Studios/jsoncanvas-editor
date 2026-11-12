@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, inject, onErrorCaptured, shallowRef, useTemplateRef, watch } from 'vue'
 import UIcon from '@nuxt/ui/components/Icon.vue'
 import { fileKind } from '../../core'
 import { CANVAS_CONTENT } from '../composables/useCanvasContent'
@@ -26,6 +26,10 @@ const props = defineProps<{
 	cardLabels: CardLabels
 	/** Drawn for an image: frames (web pages, PDFs) can't be captured, so they show their placeholder. */
 	exporting?: boolean
+	/** Part of a move in progress: drawn at the move's offset. */
+	moved?: boolean
+	/** Web pages and PDFs narrower than this (world units) show their placeholder instead of a live frame. */
+	minFrameWidth?: number
 }>()
 const content = inject(CANVAS_CONTENT)!
 const node = computed(() => props.item.node)
@@ -55,7 +59,11 @@ const groupLabel = computed(() => (props.item.kind === 'group' ? node.value.labe
 const alwaysShown = computed(() => props.item.kind === 'link'
 	|| (props.item.kind === 'file' && ['image', 'video', 'audio', 'canvas'].includes(fileKind(node.value.file as string))))
 const framed = computed(() => props.item.kind === 'link' || (props.item.kind === 'file' && fileKind(node.value.file as string) === 'pdf'))
-const placeholder = computed(() => props.exporting ? framed.value : props.contentHidden && !alwaysShown.value && !props.editing)
+// Frames can't be captured in an image; and hundreds of frames too small to read would each load a page.
+const placeholder = computed(() => props.exporting
+	? framed.value
+	: (framed.value && props.item.box.maxX - props.item.box.minX < (props.minFrameWidth ?? 0))
+		|| (props.contentHidden && !alwaysShown.value && !props.editing))
 
 const labelInput = useTemplateRef<HTMLDivElement>('labelInput')
 watch(labelInput, (el) => {
@@ -91,13 +99,23 @@ const backgroundCss = computed(() => background.value && {
 		? { backgroundRepeat: 'repeat', backgroundPosition: 'top left', backgroundSize: 'auto' }
 		: { backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundSize: 'cover' }),
 })
+
+// A card that fails to draw (a custom card throwing, say) shows so, and the rest of the canvas goes on. It tries
+// again when its node changes.
+const failed = shallowRef(false)
+watch(() => props.item.node, () => (failed.value = false))
+onErrorCaptured((error) => {
+	console.error(error)
+	failed.value = true
+	return false
+})
 </script>
 
 <template>
 	<div
 		ref="root"
 		class="jc-node"
-		:class="[`jc-node-${customSlot || customComponent ? 'custom' : item.kind}`, item.color.class, { 'jc-selected': selected, 'jc-focused': focused, 'jc-editing': editing }]"
+		:class="[`jc-node-${customSlot || customComponent ? 'custom' : item.kind}`, item.color.class, { 'jc-selected': selected, 'jc-focused': focused, 'jc-editing': editing, 'jc-moved': moved }]"
 		:style="style"
 		:data-id="item.node.id"
 		:data-key="item.key"
@@ -119,7 +137,11 @@ const backgroundCss = computed(() => background.value && {
 			{{ groupLabel }}
 		</div>
 		<div class="jc-node-container">
-			<div v-if="customSlot" class="jc-node-content">
+			<div v-if="failed" class="jc-node-content jc-unsupported">
+				<UIcon name="i-lucide-triangle-alert" class="jc-icon" />
+				<span>{{ content.messages().cardFailed }}</span>
+			</div>
+			<div v-else-if="customSlot" class="jc-node-content">
 				<SlotRender :render="customSlot" :props="customProps" />
 			</div>
 			<div v-else-if="customComponent" class="jc-node-content">

@@ -27,10 +27,26 @@ const FIELDS: Record<CanvasNodeType, (n: Record<string, unknown>) => boolean> = 
 }
 const isNodeType = (t: unknown): t is CanvasNodeType => isString(t) && Object.hasOwn(FIELDS, t)
 
-/** A node's box when it has numeric `x`, `y`, `width` and `height`; unsupported nodes can have one too. */
+/**
+ * How far from the origin, and how large, a node can be (world units). Browsers clamp layout coordinates a little
+ * beyond this (about ±3.3 × 10⁷ px), and the view's arithmetic overflows long before 10³⁰⁸.
+ */
+export const MAX_COORDINATE = 1e7
+/** How deeply a file's JSON may nest: more can't be written back without running out of stack. */
+export const MAX_DEPTH = 512
+
+const isCoordinate = (v: unknown): v is number => isNumber(v) && Math.abs(v) <= MAX_COORDINATE
+const isSize = (v: unknown): v is number => isNumber(v) && v >= 1 && v <= MAX_COORDINATE
+
+/**
+ * A node's box when it has numeric `x`, `y`, `width` and `height` (sizes at least 1, everything within
+ * `MAX_COORDINATE`); unsupported nodes can have one too. A node without one is kept but not drawn.
+ */
 export function nodeBox(node: AnyNode): BBox | undefined {
+	// Files can hold anything in `nodes`: `null`, numbers, arrays.
+	if (!isObject(node)) return
 	const { x, y, width, height } = node
-	return isNumber(x) && isNumber(y) && isNumber(width) && isNumber(height) ? bboxOf({ x, y, width, height }) : undefined
+	return isCoordinate(x) && isCoordinate(y) && isSize(width) && isSize(height) ? bboxOf({ x, y, width, height }) : undefined
 }
 
 /** Whether the editor can edit this node: a spec type with every field it needs, of the right type. */
@@ -60,12 +76,15 @@ export function orderNodes<T extends AnyNode>(nodes: readonly T[]): T[] {
 }
 
 /**
- * Reads a `.canvas` file. Empty text is an empty canvas. Throws on invalid JSON or a top level that isn't an
- * object with array `nodes`/`edges`, so a broken file is never overwritten. See `normalizeCanvas` for the rest.
+ * Reads a `.canvas` file. Empty text is an empty canvas. Throws on invalid JSON, a top level that isn't an object
+ * with array `nodes`/`edges`, or nesting deeper than `MAX_DEPTH`, so a broken file is never overwritten. See
+ * `normalizeCanvas` for the rest.
  */
 export function parseCanvas(text: string): ParsedCanvas {
 	if (!text.trim()) return { canvas: { nodes: [], edges: [] }, issues: [] }
-	return normalize(JSON.parse(text))
+	const data: unknown = JSON.parse(text)
+	checkDepth(data)
+	return normalize(data)
 }
 
 /**
@@ -74,9 +93,30 @@ export function parseCanvas(text: string): ParsedCanvas {
  * - Supported nodes: `x`, `y`, `width`, `height` rounded to integers; colors given as `"r,g,b"` become hex.
  * - Edges without (valid) `fromSide`/`toSide` get the sides facing each other, written into the data.
  * - Nodes reordered by `orderNodes`.
+ * Throws as `parseCanvas` does.
  */
 export function normalizeCanvas(data: JSONCanvas): ParsedCanvas {
+	checkDepth(data)
 	return normalize(structuredClone(data))
+}
+
+/** Throws when `value` nests more than `MAX_DEPTH` objects or arrays deep. Walks without recursing. */
+function checkDepth(value: unknown) {
+	const stack: Array<[unknown, number]> = [[value, 0]]
+	while (stack.length) {
+		const [v, depth] = stack.pop()!
+		if (typeof v !== 'object' || v === null) continue
+		if (depth >= MAX_DEPTH) throw new TypeError(`A JSON Canvas can't nest more than ${MAX_DEPTH} levels deep`)
+		for (const child of Object.values(v)) stack.push([child, depth + 1])
+	}
+}
+
+/**
+ * What `normalizeCanvas` would report for `canvas`, without copying or changing it. For documents that are already
+ * normalized (what the editor makes): it's cheap enough to run on every edit.
+ */
+export function canvasIssues(canvas: JSONCanvas): CanvasIssue[] {
+	return inspect(canvas, false)
 }
 
 function normalize(data: unknown): ParsedCanvas {
@@ -85,17 +125,24 @@ function normalize(data: unknown): ParsedCanvas {
 		if (data[key] !== undefined && !Array.isArray(data[key])) throw new TypeError(`A JSON Canvas's "${key}" must be an array`)
 	}
 	const canvas = data as JSONCanvas
-	const issues: CanvasIssue[] = []
 	if (canvas.nodes) canvas.nodes = orderNodes(canvas.nodes)
+	return { canvas, issues: inspect(canvas, true) }
+}
 
+/** `canvas`'s issues; with `fix`, also rounds boxes, converts colors and fills in edge sides, in place. */
+function inspect(canvas: JSONCanvas, fix: boolean): CanvasIssue[] {
+	const issues: CanvasIssue[] = []
 	const boxes = new Map<string, BBox | undefined>()
 	for (const [index, node] of (canvas.nodes ?? []).entries()) {
 		if (isSupportedNode(node)) {
-			node.x = Math.round(node.x)
-			node.y = Math.round(node.y)
-			node.width = Math.round(node.width)
-			node.height = Math.round(node.height)
-			if (node.color) node.color = normalizeColor(node.color)
+			if (fix) {
+				// `+ 0` turns −0 (from rounding −0.4) into 0, which is what reading the file back gives.
+				node.x = Math.round(node.x) + 0
+				node.y = Math.round(node.y) + 0
+				node.width = Math.round(node.width)
+				node.height = Math.round(node.height)
+				if (node.color) node.color = normalizeColor(node.color)
+			}
 		}
 		else {
 			const type = isObject(node) ? node.type : undefined
@@ -112,25 +159,27 @@ function normalize(data: unknown): ParsedCanvas {
 	}
 
 	const edgeIds = new Set<string>()
-	for (const [index, edge] of (canvas.edges ?? []).entries()) normalizeEdge(edge, index, boxes, edgeIds, issues)
-	return { canvas, issues }
+	for (const [index, edge] of (canvas.edges ?? []).entries()) inspectEdge(edge, index, boxes, edgeIds, issues, fix)
+	return issues
 }
 
-function normalizeEdge(edge: AnyEdge, index: number, boxes: Map<string, BBox | undefined>, ids: Set<string>, issues: CanvasIssue[]) {
+function inspectEdge(edge: AnyEdge, index: number, boxes: Map<string, BBox | undefined>, ids: Set<string>, issues: CanvasIssue[], fix: boolean) {
 	if (!isObject(edge) || !isString(edge.id) || !isString(edge.fromNode) || !isString(edge.toNode)) {
 		issues.push({ kind: 'unsupported-edge', index, id: isObject(edge) && isString(edge.id) ? edge.id : undefined })
 		return
 	}
 	if (ids.has(edge.id)) issues.push({ kind: 'duplicate-id', of: 'edge', id: edge.id })
 	ids.add(edge.id)
-	if (isString(edge.color)) edge.color = normalizeColor(edge.color)
 	for (const nodeId of [edge.fromNode, edge.toNode]) {
 		if (!boxes.has(nodeId)) issues.push({ kind: 'missing-node', edgeId: edge.id, nodeId })
 	}
-	const from = boxes.get(edge.fromNode), to = boxes.get(edge.toNode)
-	if (from && to) {
-		if (!isSide(edge.fromSide)) edge.fromSide = sideTowards(from, to)
-		if (!isSide(edge.toSide)) edge.toSide = sideTowards(to, from)
+	if (fix) {
+		if (isString(edge.color)) edge.color = normalizeColor(edge.color)
+		const from = boxes.get(edge.fromNode), to = boxes.get(edge.toNode)
+		if (from && to) {
+			if (!isSide(edge.fromSide)) edge.fromSide = sideTowards(from, to)
+			if (!isSide(edge.toSide)) edge.toSide = sideTowards(to, from)
+		}
 	}
 	if (!isSupportedEdge(edge)) issues.push({ kind: 'unsupported-edge', index, id: edge.id })
 }

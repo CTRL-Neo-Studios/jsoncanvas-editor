@@ -46,6 +46,7 @@
     "prepack": "nuxt-module-build build",
     "dev": "bun run dev:prepare && nuxi dev playground",
     "dev:build": "nuxi build playground",
+    "bench": "bun run dev:prepare && nuxi build playground && echo 'Open http://localhost:3000/bench?run' && nuxi preview playground",
     "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxi prepare playground",
     "release": "bun run prepack && changelogen --release && bun publish && git push --follow-tags",
     "test": "vitest run",
@@ -57,8 +58,7 @@
     "@comark/vue": "^0.9.1",
     "@nuxt/kit": "^4.6.4",
     "@vueuse/core": "^15.0.0",
-    "comark": "^0.9.1",
-    "modern-screenshot": "^4.7.0"
+    "comark": "^0.9.1"
   },
   "peerDependencies": {
     "@nuxt/ui": "^4.12.0",

@@ -79,13 +79,13 @@ export function raiseNodes<T extends AnyNode>(nodes: readonly T[], raise: Readon
 /** `canvas` without `nodes`, the edges attached to them, and `edges`. A group's contents stay. */
 export function removeFromCanvas(canvas: JSONCanvas, nodes: ReadonlySet<AnyNode>, edges: ReadonlySet<AnyEdge> = new Set()): JSONCanvas {
 	const kept = (canvas.nodes ?? []).filter(n => !nodes.has(n))
-	// An id that another node still has (duplicates) keeps its edges.
-	const keptIds = new Set(kept.map(n => n.id))
+	// An id that another node still has (duplicates) keeps its edges. Entries that aren't objects stay as they are.
+	const keptIds = new Set(kept.map(n => n?.id))
 	const gone = new Set([...nodes].map(n => n.id).filter(id => !keptIds.has(id)))
 	return {
 		...canvas,
 		nodes: kept,
-		edges: (canvas.edges ?? []).filter(e => !edges.has(e) && !gone.has(e.fromNode) && !gone.has(e.toNode)),
+		edges: (canvas.edges ?? []).filter(e => !edges.has(e) && !gone.has(e?.fromNode) && !gone.has(e?.toNode)),
 	}
 }
 
@@ -102,7 +102,7 @@ export function cloneNodes(canvas: JSONCanvas, nodes: readonly AnyNode[], offset
 		return { ...structuredClone(n), id, x: Math.round(box.minX + offset.x), y: Math.round(box.minY + offset.y) }
 	})
 	const copies = edges
-		.filter(e => ids.has(e.fromNode) && ids.has(e.toNode))
+		.filter(e => ids.has(e?.fromNode) && ids.has(e?.toNode))
 		.map(e => ({ ...structuredClone(e), id: newId(), fromNode: ids.get(e.fromNode)!, toNode: ids.get(e.toNode)! }))
 	return {
 		canvas: { ...canvas, nodes: orderNodes([...(canvas.nodes ?? []), ...clones]), edges: [...(canvas.edges ?? []), ...copies] },
@@ -126,7 +126,7 @@ export function copyClip(canvas: JSONCanvas, nodes: readonly AnyNode[]): CanvasC
 	const box = unionBBox(boxed.map(n => nodeBox(n)!))
 	if (!box) return
 	const ids = new Set(boxed.map(n => n.id))
-	return { nodes: boxed, edges: (canvas.edges ?? []).filter(e => ids.has(e.fromNode) && ids.has(e.toNode)), center: centerOf(box) }
+	return { nodes: boxed, edges: (canvas.edges ?? []).filter(e => ids.has(e?.fromNode) && ids.has(e?.toNode)), center: centerOf(box) }
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)

@@ -155,6 +155,7 @@ Plain props work for the last three as well (`:readonly="true"`).
 | Event | Payload | |
 |---|---|---|
 | `menu` | `CanvasMenuEvent` | A context menu is about to open. `kind` is `'canvas'`, `'node'`, `'edge'` or `'selection'`, `key` the node or edge, `at` the world point. Push groups of Nuxt UI `DropdownMenuItem`s onto `items` to add to it. |
+| `error` | `CanvasError` (`{ action, error }`) | A host member failed (`action` is its name, like `'readText'`): see [the host](#the-host). |
 | `update:*` | | The models above. |
 
 ### Slots
@@ -204,7 +205,9 @@ Through a template ref (`const editor = useTemplateRef('editor')`):
 | `filesIn(data)` → `paths \| undefined` | Your app's own drags and pastes (rows from a file tree): the paths a `DataTransfer` carries. Read `data` before any `await`. |
 | `saveImage(png)` | Saves an image from the Export as image dialog; without it, the dialog isn't offered. |
 
-Paths are whatever your app uses (Obsidian uses vault-relative paths like `Notes/Welcome.md`). Answers are cached per path until `refreshFiles`.
+Paths are whatever your app uses (Obsidian uses vault-relative paths like `Notes/Welcome.md`). Answers are cached per path until `refreshFiles`. Files are only asked for in the browser: during SSR, file cards render empty.
+
+A member that throws, rejects or answers the wrong type emits `error` and counts as having nothing: an existing file without a URL, no file picked, nothing imported, no links. A failed `readText` shows the note as its name; a failed `saveImage` is reported in the export dialog.
 
 ## Custom cards
 
@@ -225,7 +228,7 @@ const templates: CardTemplate[] = [
 ]
 ```
 
-A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves as one undo step; a key set to `undefined` is removed) and `done()` (ends editing). The canvas moves, resizes, connects, snaps, colors and copies any card by its `x`, `y`, `width`, `height` and `color`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`.
+A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves as one undo step; a key set to `undefined` is removed) and `done()` (ends editing). The canvas moves, resizes, connects, snaps, colors and copies any card by its `x`, `y`, `width`, `height` and `color`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`. `update` ignores a patch that isn't an object, changes the `id`, or leaves the node without a valid box. A card that throws while rendering shows "This card couldn't be shown" (and logs the error); the rest of the canvas carries on.
 
 File cards can be replaced per extension with `fileRenderers` (props `node`, `file` (the host's `ResolvedFile`), `host`).
 
@@ -263,7 +266,7 @@ const png = await editor.value!.exportPng({ frame: 'full', scale: 2, privacy: fa
 | `privacy` | `false` | Draws every word as a bar. |
 | `watermark` | `true` | Includes the `#watermark` slot at the bottom left. |
 
-Every card in the frame is drawn with its content. Web pages and PDFs can't be captured, so they show their placeholder. With `host.saveImage`, the controls offer Obsidian's Export as image dialog.
+Every card in the frame is drawn with its content. Web pages and PDFs can't be captured, so they show their placeholder. With `host.saveImage`, the controls offer Obsidian's Export as image dialog. The image is drawn by the browser from a copy of the canvas (an SVG `foreignObject`, with the page's stylesheets, fonts and images inlined), without a screenshot library; a full canvas of 1,000 cards takes about a second.
 
 ## Theming
 
@@ -287,11 +290,11 @@ The stylesheet is plain CSS with `jc-` classes; it uses no Tailwind utilities.
 | | |
 |---|---|
 | **Types** | `JSONCanvas`, `JSONCanvasNode` (`…TextNode`, `…FileNode`, `…LinkNode`, `…GroupNode`), `JSONCanvasEdge`, `CanvasIssue`, `CanvasSide`, `CanvasEnd`, `CanvasColor`, `Viewport`, `BBox`, `Point`, `Rect` |
-| **Files** | `parseCanvas(text)` → `{ canvas, issues }` (throws on invalid JSON, so a broken file is never overwritten), `normalizeCanvas(data)`, `stringifyCanvas(canvas)` (Obsidian's formatting), `newId()` |
-| **Checks** | `isSupportedNode`, `isSupportedEdge`, `nodeBox`, `orderNodes` (groups behind, larger first) |
+| **Files** | `parseCanvas(text)` → `{ canvas, issues }` (throws on invalid JSON or JSON nested deeper than `MAX_DEPTH`, so a broken file is never overwritten), `normalizeCanvas(data)`, `canvasIssues(canvas)` (the issues of a normalized document, without copying it), `stringifyCanvas(canvas)` (Obsidian's formatting), `newId()` |
+| **Checks** | `isSupportedNode`, `isSupportedEdge`, `nodeBox` (no box for coordinates beyond `MAX_COORDINATE` or sizes under 1: such nodes are kept but not drawn), `orderNodes` (groups behind, larger first) |
 | **Edits** | `removeFromCanvas`, `cloneNodes`, `raiseNodes`, `setBackground`, `copyClip` / `readClip` / `pasteClip` (the clipboard format), `CANVAS_CLIP_TYPE` |
 | **Layout** | `alignRects`, `distributeRects`, `justifyRects`, `arrangeRects`, `resizeBox`, `scaleBoxes`, `snap`, `gridSpacing`, `NODE_SIZE`, `GROUP_PADDING`, `MIN_NODE_SIZE` |
-| **Geometry** | `edgeGeometry` (Obsidian's curves and arrows), `bezierPoint`, `nearestSide`, `sideTowards`, `unionBBox`, `growBBox`, `intersectsBBox`, `containsBBox`, `centerOf` |
+| **Geometry** | `edgeGeometry` (Obsidian's curves and arrows), `bezierPoint`, `curveDistance`, `nearestSide`, `sideTowards`, `unionBBox`, `growBBox`, `intersectsBBox`, `containsBBox`, `centerOf` |
 | **View** | `fitViewport`, `zoomViewport`, `viewportBBox`, `viewportToWorld`, `clampZoom`, `MIN_ZOOM`, `MAX_ZOOM`, `ZOOM_BREAKPOINT`, `exportSize` |
 | **Content** | `fileKind(path)`, `fileName`, `fileExtension`, `fileLabel`, `markdownSection(text, subpath)` (a heading's section or a block), `embedUrl(url)` (YouTube and X embeds), `canvasMinimap(canvas)` |
 | **Colors** | `PRESET_COLORS`, `isPresetColor`, `normalizeColor`, `parseHexColor`, `isLightColor` |
@@ -330,13 +333,14 @@ Mod is ⌘ on macOS and Ctrl elsewhere. The canvas's help dialog (the ? control)
 bun install
 bun run dev:prepare   # type stubs
 bun run dev           # the playground, at http://localhost:3000
-bun run test          # Vitest
+bun run test          # Vitest (FUZZ_RUNS=20000 bunx vitest run test/fuzz.test.ts for a long fuzz run)
 bun run test:types    # vue-tsc
 bun run lint
+bun run bench         # production build of the playground: open /bench?run for the timings
 bun run release       # build, changelog, publish
 ```
 
-The playground shows several canvases (Obsidian's demo, the spec's sample, every kind of card, unsupported data, 1,000 nodes) over the files in `test/fixtures/vault`. To use your own:
+The playground shows several canvases (Obsidian's demo, the spec's sample, every kind of card, unsupported data, 1,000 nodes, `?canvas=Stress&nodes=5000&edges=20000`, and Chaos: broken data, hostile content, a failing host and a throwing card) over the files in `test/fixtures/vault`. To use your own:
 
 - `JC_VAULT=/path/to/vault bun run dev` serves that folder instead;
 - **Open folder…** (Chromium) opens a local folder with the File System Access API: pick one of its canvases to edit; changes are saved back to the file.

@@ -43,6 +43,12 @@ export interface CanvasHost {
 	openLink?: (target: string) => void
 }
 
+/** A host call that failed (threw, rejected, or answered with the wrong type); the canvas carried on without it. */
+export interface CanvasError {
+	action: keyof CanvasHost
+	error: unknown
+}
+
 /** Props of a component in `fileRenderers`. */
 export interface FileRendererProps {
 	node: JSONCanvasFileNode

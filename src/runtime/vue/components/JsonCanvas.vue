@@ -7,8 +7,9 @@ import { useCanvasEditor, type CardLabels } from '../composables/useCanvasEditor
 import { useCanvasExport } from '../composables/useCanvasExport'
 import { useCanvasInteraction } from '../composables/useCanvasInteraction'
 import type { WheelBehavior } from '../composables/useViewport'
-import type { CanvasHost, FileRenderers, NodeRenderers } from '../host'
+import type { CanvasError, CanvasHost, FileRenderers, NodeRenderers } from '../host'
 import { format, MESSAGES, type CanvasMessages } from '../messages'
+import { guardHost } from '../utils/guard-host'
 import { IS_MAC } from '../utils/platform'
 import CanvasCardBar from './CanvasCardBar.vue'
 import CanvasControls from './CanvasControls.vue'
@@ -55,8 +56,12 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
 	/** A context menu is about to open; add groups of items to `items` to extend it. */
 	menu: [event: CanvasMenuEvent]
+	/** A host call failed (threw, rejected or answered the wrong type); the canvas went on without it. */
+	error: [error: CanvasError]
 }>()
 const slots = defineSlots<CanvasSlots>()
+/** The host, with its failures reported (the `error` event) instead of breaking the canvas. */
+const host = computed(() => guardHost(props.host, e => emit('error', e)))
 
 /**
  * The document. A new one replaces it (and clears undo); edits are emitted as new objects, never by changing the
@@ -72,11 +77,18 @@ const snapToGrid = defineModel<boolean>('snapToGrid', { default: true })
 /** Moved and resized nodes snap to other nodes' edges and centres. */
 const snapToObjects = defineModel<boolean>('snapToObjects', { default: true })
 
-/** Node types with a custom card, from `nodeRenderers` and `#node-<type>` slots. */
-const customTypes = computed(() => new Set([
-	...Object.keys(props.nodeRenderers ?? {}),
-	...Object.keys(slots).flatMap(name => (name.startsWith('node-') ? [name.slice(5)] : [])),
-]))
+/**
+ * Node types with a custom card, from `nodeRenderers` and `#node-<type>` slots. The same set while the types are the
+ * same: `:node-renderers="{ … }"` written in a template is a new object on every render of the parent, and a new set
+ * would recompute `issues`, which a parent showing them would re-render for, forever.
+ */
+const customTypes = computed((previous?: ReadonlySet<string>) => {
+	const types = new Set([
+		...Object.keys(props.nodeRenderers ?? {}),
+		...Object.keys(slots).flatMap(name => (name.startsWith('node-') ? [name.slice(5)] : [])),
+	])
+	return previous && previous.size === types.size && [...types].every(t => previous.has(t)) ? previous : types
+})
 const messages = computed((): CanvasMessages => ({ ...MESSAGES, ...props.messages }))
 
 const el = useTemplateRef<HTMLDivElement>('el')
@@ -96,7 +108,7 @@ const interaction = useCanvasInteraction(el, editor, {
 	readonly: () => readonly.value,
 	snapToGrid: () => snapToGrid.value,
 	snapToObjects: () => snapToObjects.value,
-	host: () => props.host,
+	host: () => host.value,
 	customTypes: () => customTypes.value,
 	messages: () => messages.value,
 	actions: () => actions,
@@ -104,7 +116,7 @@ const interaction = useCanvasInteraction(el, editor, {
 const settings = { readonly, snapToGrid, snapToObjects }
 const actions = useCanvasActions(editor, interaction, {
 	settings,
-	host: () => props.host,
+	host: () => host.value,
 	messages: () => messages.value,
 	customTypes: () => customTypes.value,
 	cardTemplates: () => props.cardTemplates,
@@ -112,7 +124,7 @@ const actions = useCanvasActions(editor, interaction, {
 	onMenu: e => emit('menu', e),
 })
 const content = useCanvasContent(editor, interaction, {
-	host: () => props.host,
+	host: () => host.value,
 	fileRenderers: () => props.fileRenderers,
 	nodeRenderers: () => props.nodeRenderers,
 	slots,
@@ -121,7 +133,7 @@ const content = useCanvasContent(editor, interaction, {
 })
 provide(CANVAS_CONTENT, content)
 // Another host may answer differently.
-watch(() => props.host, () => content.refreshFiles())
+watch(host, () => content.refreshFiles())
 const { visibleNodes, visibleEdges, zoomedOut, contentHidden, selected, scene } = editor
 const { view, size, scale, settledZoom, spaceHeld, panning, moving } = editor.viewport
 const { handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEditing, menu, editing, prompt } = interaction
@@ -153,12 +165,34 @@ watch(viewportModel, (v) => {
 
 const transform = computed(() =>
 	`translate(${size.width / 2}px, ${size.height / 2}px) scale(${scale.value}) translate(${-view.x}px, ${-view.y}px)`)
+/** The view's transform, and a move's offset for the items it carries (one style change per frame of a drag). */
+const worldStyle = computed(() => {
+	const d = editor.moveDelta.value
+	return { 'transform': transform.value, '--jc-move-x': `${d.x}px`, '--jc-move-y': `${d.y}px` }
+})
 /** Card labels, edge strokes and arrows keep a readable size: √(1/scale), updated once the view is at rest. */
 const zoomMultiplier = computed(() => Math.sqrt(1 / 2 ** settledZoom.value))
+/** Zoomed out to placeholders, edges are drawn in batches (see `CanvasScene`). */
+const batchedEdges = computed(() => (contentHidden.value ? { multiplier: zoomMultiplier.value } : undefined))
+/** Web pages and PDFs get a live frame only when at least this wide on screen (as the view rests). */
+const MIN_FRAME_PX = 160
+const minFrameWidth = computed(() => MIN_FRAME_PX / 2 ** settledZoom.value)
 const patternId = useId()
+/**
+ * The dot grid: drawn once per step size on a layer one step larger than the view each way, and moved by a
+ * transform as the view pans, so panning doesn't repaint thousands of dots.
+ */
 const grid = computed(() => {
 	const step = gridSpacing(view.zoom) * scale.value
-	return { step, x: size.width / 2 - ((view.x * scale.value) % step), y: size.height / 2 - ((view.y * scale.value) % step) }
+	const offset = (v: number, half: number) => ((((half - v * scale.value) % step) + step) % step) - step
+	return {
+		step,
+		style: {
+			transform: `translate(${offset(view.x, size.width / 2)}px, ${offset(view.y, size.height / 2)}px)`,
+			width: `calc(100% + ${2 * step}px)`,
+			height: `calc(100% + ${2 * step}px)`,
+		},
+	}
 })
 /** The drag-select rectangle on screen, so its border stays 2 px at any zoom. */
 const marqueeStyle = computed(() => {
@@ -266,15 +300,15 @@ defineExpose({
 		@dragover="onDragOver"
 		@drop="onDrop"
 	>
-		<svg class="jc-background">
+		<svg class="jc-background jc-grid" :style="grid.style">
 			<defs>
-				<pattern :id="patternId" patternUnits="userSpaceOnUse" :x="grid.x" :y="grid.y" :width="grid.step" :height="grid.step">
+				<pattern :id="patternId" patternUnits="userSpaceOnUse" :width="grid.step" :height="grid.step">
 					<circle cx="0.7" cy="0.7" r="0.7" />
 				</pattern>
 			</defs>
 			<rect width="100%" height="100%" :fill="`url(#${patternId})`" />
 		</svg>
-		<div class="jc-world" :style="{ transform }">
+		<div class="jc-world" :style="worldStyle">
 			<CanvasScene
 				:nodes="visibleNodes"
 				:edges="visibleEdges"
@@ -284,6 +318,9 @@ defineExpose({
 				:editing="editing"
 				:content-hidden="contentHidden"
 				:card-labels="cardLabels"
+				:moving="editor.moving.value"
+				:batched="batchedEdges"
+				:min-frame-width="minFrameWidth"
 				@label-done="interaction.finishLabel"
 			/>
 			<CanvasOverlay :handles-for="handlesFor" :connection="connection" :ghosts="ghosts" :guides="guides" :scale="scale" />

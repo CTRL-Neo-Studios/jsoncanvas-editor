@@ -17,4 +17,6 @@ export function redactText(root: Element) {
 			return word
 		}))
 	}
+	// A broken image draws its `alt` text.
+	for (const img of root.querySelectorAll('img[alt]')) img.setAttribute('alt', '')
 }

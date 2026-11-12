@@ -23,6 +23,7 @@ const zoom = ref(0)
 const watermark = ref(true)
 const privacy = ref(false)
 const saving = ref(false)
+const failed = ref(false)
 const ratio = globalThis.devicePixelRatio || 1
 const full = computed(() => frame.value === 'full')
 const frames = computed(() => [{ label: m.value.fullCanvas, value: 'full' }, { label: m.value.viewportOnly, value: 'viewport' }])
@@ -34,6 +35,7 @@ const dimensions = computed(() => {
 
 async function save() {
 	saving.value = true
+	failed.value = false
 	try {
 		// The viewport is drawn as it's shown, without the watermark (as Obsidian does).
 		const png = await props.exporter.exportPng(full.value
@@ -41,6 +43,10 @@ async function save() {
 			: { frame: 'viewport', watermark: false, privacy: privacy.value })
 		await content.host()?.saveImage?.(png)
 		emit('close')
+	}
+	catch {
+		// The host's own failure is reported through the canvas's `error` event; either way the dialog stays.
+		failed.value = true
 	}
 	finally {
 		saving.value = false
@@ -63,6 +69,9 @@ async function save() {
 				</UFormField>
 				<USwitch v-if="full && hasWatermark" v-model="watermark" :label="m.showWatermark" :description="m.showWatermarkDescription" />
 				<USwitch v-model="privacy" :label="m.privacyMode" :description="m.privacyModeDescription" />
+				<p v-if="failed" class="jc-export-error">
+					{{ m.exportFailed }}
+				</p>
 			</div>
 		</template>
 		<template #footer>

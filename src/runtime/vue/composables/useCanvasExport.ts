@@ -1,5 +1,6 @@
 import { nextTick, shallowRef, type ShallowRef } from 'vue'
 import { EXPORT_PADDING, exportSize, growBBox, pointBox, unionBBox, viewportBBox, type BBox } from '../../core'
+import { captureElement } from '../utils/capture'
 import { redactText } from '../utils/redact'
 import type { CanvasContent } from './useCanvasContent'
 import type { CanvasEditor } from './useCanvasEditor'
@@ -41,24 +42,8 @@ const LOAD_TIMEOUT = 10_000
 const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
 
 /**
- * An empty frame for `modern-screenshot` to read default styles from. Its own loads a `srcdoc`, whose window
- * Chromium (2026) refuses `getComputedStyle` on ("Illegal invocation"); a written `about:blank` works.
- */
-function sandbox(): HTMLIFrameElement {
-	const frame = document.createElement('iframe')
-	frame.style.cssText = 'position: fixed; visibility: hidden; width: 0; height: 0; border: 0'
-	document.body.append(frame)
-	// No document (a DOM without frames, in tests): `modern-screenshot` then goes without default styles.
-	const doc = frame.contentDocument
-	doc?.open()
-	doc?.write('<!DOCTYPE html><meta charset="UTF-8"><title></title><body>')
-	doc?.close()
-	return frame
-}
-
-/**
  * Exports draw a second copy of the scene, off-screen at 100% with every card in the frame mounted and showing its
- * content, and capture it with `modern-screenshot` (loaded on first use).
+ * content, and capture it (`captureElement`).
  */
 export function useCanvasExport(editor: CanvasEditor, content: CanvasContent, el: () => HTMLElement | null): CanvasExport {
 	const frame = shallowRef<ExportFrame>()
@@ -89,8 +74,6 @@ export function useCanvasExport(editor: CanvasEditor, content: CanvasContent, el
 	}
 
 	async function exportPng(o: ExportOptions = {}): Promise<Blob> {
-		// Loaded on first export: the capture library is only needed then (as dialogs are, through async components).
-		const { createContext, destroyContext, domToBlob } = await import('modern-screenshot')
 		if (frame.value) throw new Error('An export is already running')
 		const box = frameBox(o)
 		const ratio = globalThis.devicePixelRatio || 1
@@ -101,20 +84,13 @@ export function useCanvasExport(editor: CanvasEditor, content: CanvasContent, el
 			const root = el()
 			if (!root) throw new Error('The canvas isn\'t mounted')
 			await loaded(root)
-			if (o.privacy) redactText(root)
-			const context = await createContext(root, {
+			return await captureElement(root, {
 				width: box.maxX - box.minX,
 				height: box.maxY - box.minY,
 				scale: size.scale,
-				type: 'image/png',
+				context: root.parentElement!,
+				transform: o.privacy ? redactText : undefined,
 			})
-			context.sandbox = sandbox()
-			try {
-				return await domToBlob(context)
-			}
-			finally {
-				destroyContext(context)
-			}
 		}
 		finally {
 			frame.value = undefined

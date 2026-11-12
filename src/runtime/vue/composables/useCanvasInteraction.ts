@@ -1,7 +1,7 @@
 import type { DropdownMenuItem } from '@nuxt/ui'
-import { computed, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
-	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, edgeGeometry, gridSpacing, growBBox, intersectsBBox,
+	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, curveDistance, edgeGeometry, gridSpacing, growBBox, intersectsBBox,
 	lockAxis, MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, oppositeSide, pointBox, raiseNodes, removeFromCanvas,
 	resizeBox, resizeSnapSource, scaleBoxes, snap, unionBBox,
 	type BBox, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
@@ -96,7 +96,10 @@ export interface CanvasInteraction {
 	dragNew: (e: PointerEvent, size: { width: number, height: number }, drop: (box: BBox) => void, click: () => void) => void
 	/** Lets the user pick another file for a file card. */
 	swapFile: (key: string) => void
-	/** Saves `patch` into the node at `key`; a key set to `undefined` is removed. */
+	/**
+	 * Saves `patch` into the node at `key`; a key set to `undefined` is removed. Ignored when `patch` isn't an object,
+	 * changes the node's `id` (its edges would come loose), or leaves it without a box it can be drawn in.
+	 */
 	updateNode: (key: string, patch: Record<string, unknown>) => void
 	/** Adds `node` (with a new id unless it has one) on top and selects it; returns its id. */
 	addNode: (node: Record<string, unknown> & { x: number, y: number, width: number, height: number }) => string
@@ -194,6 +197,10 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		},
 	}
 
+	/** The drag in progress's listeners, removed if the canvas goes away mid-drag (a second stop does nothing). */
+	let stopDrag: (() => void) | undefined
+	onScopeDispose(() => stopDrag?.())
+
 	/** Runs a drag whose edits start once it passes the threshold; handles and hovering pause meanwhile. */
 	function drag(e: PointerEvent, begin: (p: DragPoint) => Edit | undefined, click?: (p: DragPoint) => void) {
 		let edit: Edit | undefined
@@ -202,7 +209,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 			guides.value = []
 			ghosts.value = []
 		}
-		startDrag(e, {
+		stopDrag = startDrag(e, {
 			start: (p) => {
 				dragging.value = true
 				edit = begin(p)
@@ -282,6 +289,17 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		const from = world(down)
 		let d: Point = { x: 0, y: 0 }
 		let cloning = false
+		// Moved nodes on top from the start; while moving they're drawn at an offset, and committed on drop.
+		editor.preview(start)
+		const movedBoxes = new Set(items.map(i => scene.value.byKey.get(i.key)?.box))
+		const carried = {
+			nodes: new Set(items.map(i => i.key)),
+			edges: new Set(scene.value.edges.filter(e => movedBoxes.has(e.from) && movedBoxes.has(e.to)).map(e => e.key)),
+		}
+		const stop = () => {
+			editor.moving.value = undefined
+			editor.moveDelta.value = { x: 0, y: 0 }
+		}
 		return {
 			move(p) {
 				const w = world(p)
@@ -290,16 +308,22 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 				d = snapped(sources, d, targets, p, { x: d.x !== 0, y: d.y !== 0 })
 				cloning = isCloneKey(p)
 				ghosts.value = cloning ? boxes.map(b => translate(b, d)) : []
-				editor.preview(cloning ? start : placed(start, indices, boxes.map(b => translate(b, d))))
+				// A copy leaves the originals where they are.
+				editor.moving.value = cloning ? undefined : carried
+				editor.moveDelta.value = d
 			},
 			end() {
+				stop()
 				if (!d.x && !d.y) return editor.preview(before)
-				if (!cloning) return editor.commit()
+				if (!cloning) return editor.commit(placed(start, indices, boxes.map(b => translate(b, d))))
 				const { canvas, clones } = cloneNodes(start, indices.map(i => start.nodes[i]!), d)
 				editor.commit(canvas)
 				editor.select(clones.map(n => n.id as string))
 			},
-			cancel: () => editor.preview(before),
+			cancel: () => {
+				stop()
+				editor.preview(before)
+			},
 		}
 	}
 
@@ -607,7 +631,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		const item = key ? scene.value.byKey.get(key) : undefined
 		if (!item) {
 			// On empty canvas: a new card, being edited.
-			if (!o.readonly() && !target.closest('[data-edge], .jc-chrome')) o.actions().add('card', { at: world(e), center: true })
+			if (!o.readonly() && !target.closest('.jc-chrome') && edgeKeyAt(target, e) === undefined) o.actions().add('card', { at: world(e), center: true })
 			return
 		}
 		if (target.closest('.jc-group-label')) editLabel(item.key)
@@ -633,6 +657,28 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		reloads.value = next
 	}
 
+	/**
+	 * The edge under the pointer: its own element's, or, where edges are drawn in batches (zoomed out), the nearest
+	 * curve within half the hit band (12 px at its zoom-scaled width).
+	 */
+	function edgeKeyAt(target: Element, e: { clientX: number, clientY: number }): string | undefined {
+		const own = target.closest<HTMLElement>('[data-edge]')
+		if (own) return own.dataset.edge
+		if (!target.closest('[data-edge-batch]')) return
+		const p = world(e), reach = 12 / Math.sqrt(viewport.scale.value)
+		let best: string | undefined, bestDistance = reach
+		for (const edge of editor.visibleEdges.value) {
+			const b = edge.bounds
+			if (p.x < b.minX || p.x > b.maxX || p.y < b.minY || p.y > b.maxY) continue
+			const d = curveDistance(edge.shape.curve, p)
+			if (d <= bestDistance) {
+				best = edge.key
+				bestDistance = d
+			}
+		}
+		return best
+	}
+
 	/** A click on an edge (or its label, `at`) selects it; on the only selected edge, edits its label. */
 	function clickEdge(key: string, p: DragPoint, at?: LabelEditing['at']) {
 		const sel = editor.selected.value
@@ -647,7 +693,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		e.preventDefault()
 		const sel = editor.selected.value
 		const nodeKey = target.closest<HTMLElement>('[data-key]')?.dataset.key
-		const edgeKey = nodeKey === undefined ? target.closest<HTMLElement>('[data-edge]')?.dataset.edge : undefined
+		const edgeKey = nodeKey === undefined ? edgeKeyAt(target, e) : undefined
 		const key = nodeKey ?? edgeKey
 		let kind: MenuTarget['kind']
 		if (target.closest('.jc-selection') || (key !== undefined && sel.size > 1 && sel.has(key))) {
@@ -685,11 +731,11 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		const connect = target.closest<HTMLElement>('[data-connect]')
 		const source = connect && scene.value.byKey.get(connect.parentElement!.dataset.owner!)
 		if (source) return drag(e, () => beginConnect(source, connect.dataset.connect as CanvasSide), () => editor.select([source.key]))
-		const edgeEl = target.closest<HTMLElement>('[data-edge]')
-		const edge = edgeEl && scene.value.edgeByKey.get(edgeEl.dataset.edge!)
+		const edgeKey = edgeKeyAt(target, e)
+		const edge = edgeKey !== undefined ? scene.value.edgeByKey.get(edgeKey) : undefined
 		if (edge) {
 			// A label can be clicked into but not dragged.
-			const onLabel = edgeEl.classList.contains('jc-edge-label')
+			const onLabel = !!target.closest('.jc-edge-label')
 			return drag(e, () => (onLabel ? undefined : beginReconnect(edge, world(e))), p => clickEdge(edge.key, p, onLabel ? { x: p.clientX, y: p.clientY } : undefined))
 		}
 		const handle = target.closest<HTMLElement>('[data-resize]')
@@ -797,8 +843,9 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		editing, startEditing, finishEditing, reloads, reload, swapFile, prompt, editLabel, openNode, dragging, dragNew,
 		updateNode(key, patch) {
 			const item = scene.value.byKey.get(key)
-			if (!item || o.readonly()) return
+			if (!item || o.readonly() || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return
 			const node = Object.fromEntries(Object.entries({ ...item.node, ...patch }).filter(([, v]) => v !== undefined))
+			if (node.id !== item.node.id || !nodeBox(node)) return
 			const doc = editor.canvas.value
 			editor.commit({ ...doc, nodes: doc.nodes!.map(n => (n === item.node ? node : n)) })
 		},

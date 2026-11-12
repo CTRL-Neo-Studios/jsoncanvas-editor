@@ -163,6 +163,15 @@
 	color: var(--ui-text-dimmed, #a1a1a1);
 }
 
+/* A label of a few paragraphs shows its first lines (all of it while edited), so it can't cover the canvas. */
+.jc-edge-label:not(.jc-editing) .jc-edge-label-text {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 8;
+	line-clamp: 8;
+	overflow: hidden;
+}
+
 /* Nodes */
 
 .jc-node {
@@ -958,4 +967,33 @@
 
 .jc-export-save {
 	margin-left: auto;
+}
+
+/* Carried by a move in progress: drawn at the move's offset until it's committed. */
+.jc-moved {
+	translate: var(--jc-move-x) var(--jc-move-y);
+}
+
+/* Zoomed out, unselected edges are drawn a few paths at a time; their arrowheads are sized in the path already. */
+.jc-edge-arrow.jc-edge-arrows {
+	transform: none;
+}
+
+/* Zoomed far out, cards are plain boxes: containment, clipping and shadows would give each of thousands of cards its
+   own paint state, rebuilt on every frame of a pan. Their content still clips itself. */
+.jc-zoomed-out > .jc-world .jc-node-container {
+	contain: none;
+	overflow: visible;
+	box-shadow: none;
+}
+
+/* The view's dot grid sits on a layer of its own, moved rather than repainted as the view pans. */
+.jc-grid {
+	will-change: transform;
+}
+
+.jc-export-error {
+	margin: 0;
+	color: var(--ui-error, #ef4444);
+	font-size: 0.875rem;
 }

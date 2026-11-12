@@ -70,10 +70,12 @@ export function snap(sources: readonly BBox[], targets: readonly BBox[], o: Snap
 	const useX = o.x !== false, useY = o.y !== false
 	let mx: AxisMatch | undefined, my: AxisMatch | undefined
 	if (o.objects !== false) {
-		const src = snapPoints(sources), dst = snapPoints(targets)
+		const t = targetIndex(targets)
+		// Duplicates among the sources' points do no harm, and every frame of a drag has new sources.
+		const src = sources.flatMap(boxPoints)
 		const threshold = Math.ceil(OBJECT_SNAP_DISTANCE / o.scale)
-		if (useX) mx = matchAxis(src, dst, 'x', threshold)
-		if (useY) my = matchAxis(src, dst, 'y', threshold)
+		if (useX) mx = matchAxis(src, t.points, t.x, 'x', threshold)
+		if (useY) my = matchAxis(src, t.points, t.y, 'y', threshold)
 	}
 	let dx = mx?.delta ?? 0, dy = my?.delta ?? 0
 	if (o.grid !== false) {
@@ -95,8 +97,25 @@ export function snap(sources: readonly BBox[], targets: readonly BBox[], o: Snap
 	return { dx, dy, guides }
 }
 
-function matchAxis(sources: Point[], targets: Point[], axis: Axis, threshold: number): AxisMatch | undefined {
-	const coords = [...new Set(targets.map(p => p[axis]))].sort((a, b) => a - b)
+/** A box's 4 corners and centre. */
+const boxPoints = (b: BBox): Point[] => {
+	const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2
+	return [{ x: b.minX, y: b.minY }, { x: b.maxX, y: b.minY }, { x: b.minX, y: b.maxY }, { x: b.maxX, y: b.maxY }, { x: cx, y: cy }]
+}
+
+/** Targets' points and their sorted coordinates, per targets array: a drag snaps to the same ones every frame. */
+const targetIndexes = new WeakMap<readonly BBox[], { points: Point[], x: number[], y: number[] }>()
+function targetIndex(targets: readonly BBox[]) {
+	let index = targetIndexes.get(targets)
+	if (!index) {
+		const points = snapPoints(targets)
+		const sorted = (axis: Axis) => [...new Set(points.map(p => p[axis]))].sort((a, b) => a - b)
+		targetIndexes.set(targets, index = { points, x: sorted('x'), y: sorted('y') })
+	}
+	return index
+}
+
+function matchAxis(sources: Point[], targets: Point[], coords: number[], axis: Axis, threshold: number): AxisMatch | undefined {
 	if (!coords.length) return
 	let best: AxisMatch | undefined
 	for (const s of sources) {
