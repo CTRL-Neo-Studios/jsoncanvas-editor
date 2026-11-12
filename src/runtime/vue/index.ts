@@ -5,6 +5,7 @@ export type {
 } from './composables/useCanvasActions'
 export type { CanvasSlots } from './composables/useCanvasContent'
 export type { CardLabels } from './composables/useCanvasEditor'
+export type { ExportOptions } from './composables/useCanvasExport'
 export type { WheelBehavior } from './composables/useViewport'
 export type { CanvasHost, CanvasLink, FileRendererProps, FileRenderers, NodeRendererProps, NodeRenderers, ResolvedFile } from './host'
 export { MESSAGES, type CanvasMessages } from './messages'

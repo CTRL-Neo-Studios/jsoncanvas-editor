@@ -19,6 +19,8 @@ const props = defineProps<{
 	editing?: string
 	contentHidden: boolean
 	cardLabels: CardLabels
+	/** Drawn for an image (see `CanvasNode`). */
+	exporting?: boolean
 }>()
 const emit = defineEmits<{ labelDone: [key: string, text: string] }>()
 
@@ -67,6 +69,7 @@ const labelled = computed(() => props.edges.filter(e => e.edge.label || e.key ==
 		:label-editing="labelEditing?.key === n.key ? labelEditing : undefined"
 		:content-hidden="contentHidden"
 		:card-labels="cardLabels"
+		:exporting="exporting"
 	/>
 	<CanvasEdgeLabel
 		v-for="e in labelled"

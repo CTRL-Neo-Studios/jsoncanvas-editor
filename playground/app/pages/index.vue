@@ -116,6 +116,13 @@ onMounted(() => {
 						{{ node.note }}
 					</div>
 				</template>
+				<!-- Drawn at the bottom left of exported images. -->
+				<template #watermark>
+					<span class="flex items-center gap-2 text-4xl font-bold text-muted">
+						<UIcon name="i-lucide-layout-dashboard" />
+						JSON Canvas
+					</span>
+				</template>
 			</JsonCanvas>
 		</div>
 	</div>

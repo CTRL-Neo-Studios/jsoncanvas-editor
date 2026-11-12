@@ -263,7 +263,7 @@
 	opacity: 1;
 }
 
-.jc-zoomed-out .jc-node-label {
+.jc-zoomed-out > .jc-world .jc-node-label {
 	display: none;
 }
 
@@ -906,4 +906,56 @@
 	background: var(--ui-bg-elevated, #f4f4f5);
 	font-family: inherit;
 	font-size: 0.8125rem;
+}
+
+/* Export: a copy of the scene at 100%, laid out (so cards load and measure) but never seen. */
+.jc-export-host {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	opacity: 0;
+	pointer-events: none;
+	z-index: -1;
+}
+
+.jc-export {
+	--jc-zoom-multiplier: 1;
+
+	position: absolute;
+	left: 0;
+	top: 0;
+	overflow: hidden;
+	background: var(--ui-bg, #fff);
+}
+
+.jc-watermark {
+	position: absolute;
+	left: 24px;
+	bottom: 24px;
+}
+
+/* Privacy mode: each word a bar in its color. */
+.jc-redacted {
+	-webkit-text-fill-color: transparent;
+	background: linear-gradient(transparent 30%, currentColor 30% 70%, transparent 70%);
+	border-radius: 0.25em;
+}
+
+.jc-export-form {
+	display: grid;
+	gap: 1rem;
+}
+
+.jc-export-select {
+	width: 12rem;
+}
+
+.jc-export-zoom {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.jc-export-save {
+	margin-left: auto;
 }

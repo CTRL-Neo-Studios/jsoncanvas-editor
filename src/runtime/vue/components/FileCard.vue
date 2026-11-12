@@ -25,8 +25,12 @@ const kind = computed(() => fileKind(`file.${ext.value}`))
 const renderer = computed(() => content.fileRenderers()?.[ext.value])
 const url = computed(() => file.value?.url)
 
-watch([() => node.value.file, content.fileVersion], async ([path]) => {
+watch([() => node.value.file, content.fileVersion], ([path]) => {
 	file.value = text.value = undefined
+	void content.track(load(path))
+}, { immediate: true })
+
+async function load(path: string) {
 	// A host that fails to answer gets a generic card, never the "missing" one with its Remove button.
 	const resolved = await content.resolveFile(path).catch((): ResolvedFile => ({ exists: true }))
 	if (path !== node.value.file) return
@@ -34,7 +38,7 @@ watch([() => node.value.file, content.fileVersion], async ([path]) => {
 	if (!resolved.exists || renderer.value || !['markdown', 'canvas'].includes(kind.value)) return
 	const read = await content.readText(path).catch(() => null)
 	if (path === node.value.file) text.value = read
-}, { immediate: true })
+}
 
 /** What a note card shows: the note, or the heading or block it's narrowed to. */
 const section = computed(() => (typeof text.value === 'string' ? markdownSection(text.value, node.value.subpath ?? '') : undefined))

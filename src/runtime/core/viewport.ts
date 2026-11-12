@@ -39,3 +39,18 @@ export function viewportBBox(v: Viewport, width: number, height: number): BBox {
 	const s = 2 ** v.zoom, w = width / 2 / s, h = height / 2 / s
 	return { minX: v.x - w, minY: v.y - h, maxX: v.x + w, maxY: v.y + h }
 }
+
+/** Space around the cards in an exported image (world units), as Obsidian leaves. */
+export const EXPORT_PADDING = 100
+/** The largest side of an exported image (px): browsers can't draw a larger canvas. */
+export const MAX_EXPORT_SIZE = 16284
+
+/**
+ * An image of `box` at `scale` image px per world unit: its size in px, and the scale used, lowered so neither side
+ * passes `MAX_EXPORT_SIZE`.
+ */
+export function exportSize(box: BBox, scale: number): { width: number, height: number, scale: number } {
+	const w = box.maxX - box.minX, h = box.maxY - box.minY
+	const s = Math.min(scale, MAX_EXPORT_SIZE / w, MAX_EXPORT_SIZE / h)
+	return { width: Math.round(w * s), height: Math.round(h * s), scale: s }
+}

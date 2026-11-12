@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, shallowRef, watch } from 'vue'
+import { inject, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { MarkdownDocument } from '@comark/vue'
 import type { MarkdownDocument as Parsed } from 'comark'
 import { CANVAS_CONTENT } from '../composables/useCanvasContent'
@@ -11,9 +11,15 @@ const content = inject(CANVAS_CONTENT)!
 
 const doc = shallowRef<Parsed>()
 watch(() => props.text, async (text) => {
-	const parsed = await parseMarkdown(text)
+	const parsed = await content.track(parseMarkdown(text))
 	if (text === props.text) doc.value = parsed
 }, { immediate: true })
+
+// Comark renders asynchronously too; an export waits for that.
+let rendered: (() => void) | undefined
+const onPending = () => void content.track(new Promise<void>(resolve => (rendered = resolve)))
+const onResolve = () => rendered?.()
+onBeforeUnmount(onResolve)
 
 function onClick(e: MouseEvent) {
 	const a = (e.target as Element).closest<HTMLAnchorElement>('a[href]')
@@ -27,7 +33,7 @@ function onClick(e: MouseEvent) {
 <template>
 	<div class="jc-markdown" @click="onClick">
 		<!-- Comark's renderer has an async setup: its own Suspense, so it renders without one around the canvas. -->
-		<Suspense>
+		<Suspense @pending="onPending" @resolve="onResolve">
 			<MarkdownDocument v-if="doc" :value="doc" />
 		</Suspense>
 	</div>

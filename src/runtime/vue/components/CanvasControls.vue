@@ -7,13 +7,15 @@ import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import type { CanvasSettings } from '../composables/useCanvasActions'
 import { CANVAS_CONTENT } from '../composables/useCanvasContent'
 
-/** The controls at the canvas's right: settings, zoom, undo/redo and help. */
+/** The controls at the canvas's right: settings, zoom, undo/redo, export and help. */
 const props = defineProps<{
 	settings: CanvasSettings
 	canUndo: boolean
 	canRedo: boolean
+	/** The host can save an exported image. */
+	canExport?: boolean
 }>()
-const emit = defineEmits<{ zoomIn: [], zoomOut: [], resetZoom: [], zoomToFit: [], undo: [], redo: [], help: [], setting: [key: keyof CanvasSettings, value: boolean] }>()
+const emit = defineEmits<{ zoomIn: [], zoomOut: [], resetZoom: [], zoomToFit: [], undo: [], redo: [], export: [], help: [], setting: [key: keyof CanvasSettings, value: boolean] }>()
 const content = inject(CANVAS_CONTENT)!
 const m = computed(() => content.messages())
 
@@ -63,6 +65,9 @@ const settingsItems = computed((): DropdownMenuItem[] => {
 			</UTooltip>
 		</div>
 		<div class="jc-control-group">
+			<UTooltip v-if="canExport" :text="m.exportAsImage" :content="{ side: 'left' }">
+				<UButton icon="i-lucide-image-down" :aria-label="m.exportAsImage" color="neutral" variant="ghost" size="sm" @click="emit('export')" />
+			</UTooltip>
 			<UTooltip :text="m.help" :content="{ side: 'left' }">
 				<UButton icon="i-lucide-circle-help" :aria-label="m.help" color="neutral" variant="ghost" size="sm" @click="emit('help')" />
 			</UTooltip>

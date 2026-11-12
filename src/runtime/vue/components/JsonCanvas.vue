@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, useId, useTemplateRef, watch } from 'vue'
-import { gridSpacing, type JSONCanvas, type Viewport } from '../../core'
+import { gridSpacing, intersectsBBox, type JSONCanvas, type Viewport } from '../../core'
 import { useCanvasActions, type CanvasMenuEvent, type CardTemplate, type ModDragBehavior } from '../composables/useCanvasActions'
 import { CANVAS_CONTENT, useCanvasContent, type CanvasSlots } from '../composables/useCanvasContent'
 import { useCanvasEditor, type CardLabels } from '../composables/useCanvasEditor'
+import { useCanvasExport } from '../composables/useCanvasExport'
 import { useCanvasInteraction } from '../composables/useCanvasInteraction'
 import type { WheelBehavior } from '../composables/useViewport'
 import type { CanvasHost, FileRenderers, NodeRenderers } from '../host'
@@ -19,6 +20,7 @@ import CanvasToolbar from './CanvasToolbar.vue'
 // Dialogs load when first shown, so their dependencies aren't needed until then.
 const CanvasPrompt = defineAsyncComponent(() => import('./CanvasPrompt.vue'))
 const CanvasHelp = defineAsyncComponent(() => import('./CanvasHelp.vue'))
+const CanvasExport = defineAsyncComponent(() => import('./CanvasExport.vue'))
 
 const props = withDefaults(defineProps<{
 	/** What a plain mouse wheel does; the other happens with Mod or Space held. */
@@ -126,6 +128,22 @@ const { handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEdit
 
 const helpOpen = ref(false)
 const openHelp = () => (helpOpen.value = true)
+const exportOpen = ref(false)
+/** Opens the export dialog (it saves through `host.saveImage`). */
+const openExport = () => (exportOpen.value = true)
+const exporter = useCanvasExport(editor, content, () => exportEl.value)
+const exportEl = useTemplateRef<HTMLDivElement>('exportEl')
+/** What an export draws: everything in its frame, regardless of the view. */
+const exportScene = computed(() => {
+	const box = exporter.frame.value?.box
+	return box && {
+		box,
+		nodes: scene.value.nodes.filter(n => intersectsBBox(n.box, box)),
+		edges: scene.value.edges.filter(e => intersectsBBox(e.bounds, box)),
+		grid: gridSpacing(0),
+	}
+})
+const NO_SELECTION: ReadonlySet<string> = new Set()
 const ZOOM_STEP = 0.5
 
 // Compared by value: the parent may hand back what was emitted as a different (reactive) object.
@@ -214,6 +232,12 @@ defineExpose({
 	setViewport: editor.viewport.setViewport,
 	screenToWorld: editor.viewport.screenToWorld,
 	openHelp,
+	/**
+	 * The canvas (or the view) as a PNG: `frame` `'full'` (default) or `'viewport'`, `scale` (image px per world unit),
+	 * `privacy`, `padding`, `watermark`.
+	 */
+	exportPng: exporter.exportPng,
+	openExport,
 })
 </script>
 
@@ -275,11 +299,12 @@ defineExpose({
 			</slot>
 		</template>
 		<template v-if="controls">
-			<slot name="controls" :settings="settings" :actions="actions" :open-help="openHelp">
+			<slot name="controls" :settings="settings" :actions="actions" :open-help="openHelp" :open-export="openExport">
 				<CanvasControls
 					:settings="settings"
 					:can-undo="editor.canUndo.value"
 					:can-redo="editor.canRedo.value"
+					:can-export="!!host?.saveImage"
 					@zoom-in="editor.viewport.zoomBy(ZOOM_STEP)"
 					@zoom-out="editor.viewport.zoomBy(-ZOOM_STEP)"
 					@reset-zoom="editor.viewport.zoomBy(-view.zoom)"
@@ -287,6 +312,7 @@ defineExpose({
 					@undo="editor.undo"
 					@redo="editor.redo"
 					@help="openHelp"
+					@export="openExport"
 					@setting="(key, value) => (settings[key].value = value)"
 				/>
 			</slot>
@@ -299,5 +325,36 @@ defineExpose({
 		<CanvasMenu :menu="menu" @close="interaction.closeMenu" />
 		<CanvasPrompt v-if="prompt" :prompt="prompt" @close="interaction.prompt.value = undefined" />
 		<CanvasHelp v-if="helpOpen" :wheel-behavior="wheelBehavior" @close="helpOpen = false" />
+		<CanvasExport v-if="exportOpen" :exporter="exporter" :has-watermark="!!slots.watermark" @close="exportOpen = false" />
+		<!-- An export's copy of the scene: laid out, so cards load and measure, but never seen. -->
+		<div v-if="exportScene" class="jc-export-host">
+			<div
+				ref="exportEl"
+				class="jc-export"
+				:style="{ width: `${exportScene.box.maxX - exportScene.box.minX}px`, height: `${exportScene.box.maxY - exportScene.box.minY}px` }"
+			>
+				<svg class="jc-background">
+					<defs>
+						<pattern :id="`${patternId}-export`" patternUnits="userSpaceOnUse" :x="-exportScene.box.minX" :y="-exportScene.box.minY" :width="exportScene.grid" :height="exportScene.grid">
+							<circle cx="0.7" cy="0.7" r="0.7" />
+						</pattern>
+					</defs>
+					<rect width="100%" height="100%" :fill="`url(#${patternId}-export)`" />
+				</svg>
+				<div class="jc-world" :style="{ transform: `translate(${-exportScene.box.minX}px, ${-exportScene.box.minY}px)` }">
+					<CanvasScene
+						:nodes="exportScene.nodes"
+						:edges="exportScene.edges"
+						:selected="NO_SELECTION"
+						:content-hidden="false"
+						:card-labels="cardLabels"
+						exporting
+					/>
+				</div>
+				<div v-if="exporter.frame.value?.watermark && slots.watermark" class="jc-watermark">
+					<slot name="watermark" />
+				</div>
+			</div>
+		</div>
 	</div>
 </template>

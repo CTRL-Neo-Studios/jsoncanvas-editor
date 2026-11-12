@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileLabel, fitViewport, viewportBBox, viewportToWorld, zoomViewport } from '../src/runtime/core'
+import { exportSize, fileLabel, fitViewport, viewportBBox, viewportToWorld, zoomViewport } from '../src/runtime/core'
 
 describe('fitViewport', () => {
 	it('centres the box with 10% to spare', () => {
@@ -29,6 +29,12 @@ describe('zoomViewport', () => {
 
 it('viewportBBox spans the view in world units', () => {
 	expect(viewportBBox({ x: 0, y: 0, zoom: -1 }, 800, 600)).toEqual({ minX: -800, minY: -600, maxX: 800, maxY: 600 })
+})
+
+it('exportSize lowers the scale so no side passes the browser\'s limit', () => {
+	expect(exportSize({ minX: 0, minY: 0, maxX: 3210, maxY: 2060 }, 2)).toEqual({ width: 6420, height: 4120, scale: 2 })
+	const wide = exportSize({ minX: -100, minY: -100, maxX: 20_100, maxY: 1000 }, 2)
+	expect(wide).toEqual({ width: 16284, height: 887, scale: 16284 / 20_200 })
 })
 
 describe('fileLabel', () => {

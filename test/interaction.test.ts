@@ -8,6 +8,24 @@ import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
 import { IS_MAC } from '../src/runtime/vue/utils/platform'
 import DropdownMenuStub from './stubs/DropdownMenuStub.vue'
 
+/** What an export handed to `modern-screenshot`, read when it was handed over (the export DOM goes right after). */
+const captures = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>, keys: string[], placeholders: string[], frames: number, redacted: string[], watermark?: string }>)
+vi.mock('modern-screenshot', () => ({
+	createContext: async (root: Element, options: Record<string, unknown>) => {
+		captures.push({
+			options,
+			keys: [...root.querySelectorAll<HTMLElement>('[data-key]')].map(n => n.dataset.key!),
+			placeholders: [...root.querySelectorAll<HTMLElement>('[data-key]:has(.jc-placeholder)')].map(n => n.dataset.key!),
+			frames: root.querySelectorAll('iframe').length,
+			redacted: [...root.querySelectorAll('.jc-redacted')].map(w => w.textContent!),
+			watermark: root.querySelector('.jc-watermark')?.textContent ?? undefined,
+		})
+		return {}
+	},
+	domToBlob: async () => new Blob(['png'], { type: 'image/png' }),
+	destroyContext: () => {},
+}))
+
 /** The view is 1000 × 800 and centred on the world origin at 100%: client = world + (500, 400). */
 const W = 1000, H = 800
 const MOD = IS_MAC ? { metaKey: true } : { ctrlKey: true }
@@ -688,5 +706,26 @@ describe('clipboard and drops', () => {
 		root().dispatchEvent(Object.assign(drop, { dataTransfer: rows }))
 		await flushPromises()
 		expect(added(12)).toMatchObject([{ type: 'file', file: 'Notes/a.md', x: 800, y: -200 }])
+	})
+})
+
+describe('export', () => {
+	it('draws every card in the frame (pages as placeholders, text as bars in privacy mode) with the watermark', async () => {
+		const link = { id: 'l', type: 'link', url: 'https://example.com', x: 0, y: 300, width: 200, height: 100 }
+		await setup({ nodes: [card('a', 0, 0), card('far', 5000, 3000), link] }, {}, { watermark: () => [h('b', 'Logo')] })
+		expect(wrapper.find('[data-key="far"]').exists()).toBe(false) // out of view
+		const png = await wrapper.vm.exportPng({ scale: 2, privacy: true })
+		expect(png.type).toBe('image/png')
+		const c = captures.at(-1)!
+		expect(c.options).toMatchObject({ width: 5300, height: 3250, scale: 2 })
+		expect(c.keys.sort()).toEqual(['a', 'far', 'l'])
+		expect([c.placeholders, c.frames]).toEqual([['l'], 0])
+		expect(c.redacted).toEqual(expect.arrayContaining(['far', 'https://example.com', 'Logo']))
+		expect(c.watermark).toBe('Logo')
+		await nextTick()
+		expect(wrapper.find('.jc-export-host').exists()).toBe(false)
+
+		await wrapper.vm.exportPng({ frame: 'viewport', watermark: false })
+		expect(captures.at(-1)).toMatchObject({ options: { width: W, height: H, scale: 1 }, redacted: [], watermark: undefined })
 	})
 })

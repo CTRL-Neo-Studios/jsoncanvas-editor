@@ -33,6 +33,8 @@ export interface CanvasHost {
 	 * `undefined` when it carries none. Called during the event, so `data` must be read before any `await`.
 	 */
 	filesIn?: (data: DataTransfer) => string[] | Promise<string[]> | undefined
+	/** Saves an image exported from the canvas (a PNG); without it, the chrome offers no export. */
+	saveImage?: (png: Blob) => void | Promise<void>
 	/** The places the note at `path` links to. */
 	listLinks?: (path: string) => CanvasLink[] | Promise<CanvasLink[]>
 	/** Opens a file outside the canvas (`newTab` with Mod held). */

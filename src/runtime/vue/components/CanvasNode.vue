@@ -24,6 +24,8 @@ const props = defineProps<{
 	/** Zoomed out past the breakpoint: show a placeholder instead of the content. */
 	contentHidden: boolean
 	cardLabels: CardLabels
+	/** Drawn for an image: frames (web pages, PDFs) can't be captured, so they show their placeholder. */
+	exporting?: boolean
 }>()
 const content = inject(CANVAS_CONTENT)!
 const node = computed(() => props.item.node)
@@ -52,6 +54,8 @@ const groupLabel = computed(() => (props.item.kind === 'group' ? node.value.labe
 /** Media, canvases and pages stay loaded when zoomed out, as in Obsidian (and so keep playing). */
 const alwaysShown = computed(() => props.item.kind === 'link'
 	|| (props.item.kind === 'file' && ['image', 'video', 'audio', 'canvas'].includes(fileKind(node.value.file as string))))
+const framed = computed(() => props.item.kind === 'link' || (props.item.kind === 'file' && fileKind(node.value.file as string) === 'pdf'))
+const placeholder = computed(() => props.exporting ? framed.value : props.contentHidden && !alwaysShown.value && !props.editing)
 
 const labelInput = useTemplateRef<HTMLDivElement>('labelInput')
 watch(labelInput, (el) => {
@@ -71,7 +75,7 @@ const backgroundPath = computed(() => (props.item.kind === 'group' && typeof nod
 watch([backgroundPath, content.fileVersion], async ([path]) => {
 	background.value = undefined
 	if (!path) return
-	const url = (await content.resolveFile(path).catch(() => undefined))?.url
+	const url = (await content.track(content.resolveFile(path)).catch(() => undefined))?.url
 	if (path === backgroundPath.value) background.value = url
 }, { immediate: true })
 watch([background, () => node.value.backgroundStyle], ([url, s]) => {
@@ -126,7 +130,7 @@ const backgroundCss = computed(() => background.value && {
 				<UIcon name="i-lucide-triangle-alert" class="jc-icon" />
 				<span>{{ content.messages().unsupportedNode }}{{ typeof node.type === 'string' ? `: ${node.type}` : '' }}</span>
 			</div>
-			<div v-else-if="contentHidden && !alwaysShown && !editing" class="jc-placeholder">
+			<div v-else-if="placeholder" class="jc-placeholder">
 				<UIcon v-if="item.kind === 'text'" name="i-lucide-align-left" class="jc-placeholder-icon" />
 				<template v-else>
 					{{ item.label }}

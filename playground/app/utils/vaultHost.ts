@@ -43,6 +43,13 @@ export function createVaultHost(): CanvasHost {
 			})
 		},
 		readText,
+		saveImage(png) {
+			const a = document.createElement('a')
+			a.href = URL.createObjectURL(png)
+			a.download = 'canvas.png'
+			a.click()
+			setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+		},
 		async listLinks(path) {
 			index ??= fetch('/vault-index').then(res => res.json())
 			const [text, paths] = await Promise.all([readText(path), index])

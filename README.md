@@ -51,9 +51,11 @@ const viewport = ref<Viewport>() // optional; without one the view fits the canv
 </script>
 ```
 
-Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). `v-model:readonly`, `v-model:snapToGrid` and `v-model:snapToObjects` are also changed from the canvas's settings. Other props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`, `cardTemplates`, `modDragBehavior` (what Mod+drag on empty canvas makes: `'menu'`, `'card'`, `'file'`, `'media'`, `'webpage'` or `'group'`), `messages` and `toolbar` / `controls` / `cardBar` (`false` hides them). The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `actions`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()`, `refreshFiles()` and `openHelp()`.
+Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). `v-model:readonly`, `v-model:snapToGrid` and `v-model:snapToObjects` are also changed from the canvas's settings. Other props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`, `cardTemplates`, `modDragBehavior` (what Mod+drag on empty canvas makes: `'menu'`, `'card'`, `'file'`, `'media'`, `'webpage'` or `'group'`), `messages` and `toolbar` / `controls` / `cardBar` (`false` hides them). The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `actions`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()`, `refreshFiles()`, `exportPng()`, `openExport()` and `openHelp()`.
 
-The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the selection, controls at the right (settings, zoom, undo/redo, help), and a bar of cards to add at the bottom. Each can be hidden by prop or replaced by a slot (`#toolbar`, `#controls`, `#card-bar`, `#empty`), which gets `actions` (what the built-in chrome calls). Every string can be replaced through `messages` (`MESSAGES` lists them). Context menus can be extended from the `menu` event: push groups of Nuxt UI menu items onto `event.items` (`event.kind` is `canvas`, `node`, `edge` or `selection`).
+The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the selection, controls at the right (settings, zoom, undo/redo, export, help), and a bar of cards to add at the bottom. Each can be hidden by prop or replaced by a slot (`#toolbar`, `#controls`, `#card-bar`, `#empty`), which gets `actions` (what the built-in chrome calls). Every string can be replaced through `messages` (`MESSAGES` lists them). Context menus can be extended from the `menu` event: push groups of Nuxt UI menu items onto `event.items` (`event.kind` is `canvas`, `node`, `edge` or `selection`).
+
+`exportPng({ frame, scale, privacy, padding, watermark })` resolves to a PNG `Blob` of the whole canvas (`frame: 'full'`, the default, with `padding` 100 around the cards) or of what the view shows (`'viewport'`). `scale` is image pixels per canvas unit (default: the screen's pixel ratio, times the zoom for the viewport), lowered so no side passes 16,284 px. Every card in the frame is drawn with its content; web pages and PDFs, which can't be captured, show their placeholder. `privacy` draws text as bars, and the `#watermark` slot (a logo) is drawn at the bottom left unless `watermark: false`. With `host.saveImage(png)`, the controls offer Obsidian's Export as image dialog, which saves through it.
 
 `host` (a `CanvasHost`, every member optional) connects the canvas to the app around it; without a member, the canvas leaves out what needs it:
 
@@ -67,6 +69,7 @@ The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the
 | `openLink(target)` | `[[wiki-links]]` in cards |
 | `importFiles(files)` → paths | files pasted or dropped onto the canvas (from the OS) become file cards |
 | `filesIn(data)` → paths | the app's own drags and pastes (rows from its file tree) become file cards; read `data` before any `await` |
+| `saveImage(png)` | saving an image from the Export as image dialog (without it, the dialog isn't offered) |
 
 Loaded files are cached; call `refreshFiles(paths?)` when they change outside the canvas.
 
@@ -111,8 +114,7 @@ The editor currently:
 - Right-click on empty canvas to add cards, files, media, web pages, groups or custom cards, undo/redo, select all, zoom to fit and toggle snapping and read-only; on a multi-selection for the toolbar's actions. Double-click empty canvas to add a card; Mod+drag to add one at the drawn size
 - Controls for settings, zoom, undo/redo and a help dialog of every gesture and key; a bottom bar to click or drag new cards in; a hint on an empty canvas
 - Copy, cut and paste cards with the edges among them (Obsidian's `obsidian/canvas` clipboard format, so cards copy to and from Obsidian, plus the JSON as plain text). Pasted text becomes a card, a pasted `http(s)` URL a web page, pasted or dropped files file cards (`host.importFiles`); the app's own drags through `host.filesIn`. A host without browser clipboard events (WebKit fires none with no text selected) can call `actions.copy(dataTransfer)` / `actions.paste(dataTransfer)` itself
-
-Export as PNG comes next.
+- Exports the canvas, or the view, as a PNG (privacy mode, a watermark slot)
 
 Inspiration and reference implementations for rendering-only solutions:
 

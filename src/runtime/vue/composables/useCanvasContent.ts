@@ -15,12 +15,14 @@ export interface CanvasSlots {
 	'text-editor'?: (props: { node: JSONCanvasTextNode, text: string, update: (text: string) => void, done: () => void }) => VNode[]
 	/** Replaces the floating toolbar above the selection. */
 	'toolbar'?: (props: { actions: CanvasActions }) => VNode[]
-	/** Replaces the controls at the right (settings, zoom, undo, help). */
-	'controls'?: (props: { settings: CanvasSettings, actions: CanvasActions, openHelp: () => void }) => VNode[]
+	/** Replaces the controls at the right (settings, zoom, undo, export, help). */
+	'controls'?: (props: { settings: CanvasSettings, actions: CanvasActions, openHelp: () => void, openExport: () => void }) => VNode[]
 	/** Replaces the bar of cards to add at the bottom. */
 	'card-bar'?: (props: { actions: CanvasActions, templates: readonly CardTemplate[] }) => VNode[]
 	/** Replaces the hint shown on an empty canvas. */
 	'empty'?: () => VNode[]
+	/** Drawn at the bottom left of exported images (a logo). */
+	'watermark'?: () => VNode[]
 }
 
 /** What cards need from the canvas around them (provided by `<JsonCanvas>`). */
@@ -44,6 +46,10 @@ export interface CanvasContent {
 	setAspect: (key: string, ratio: number) => void
 	/** A card's content needs exactly this height (an audio player). */
 	setHeight: (key: string, height: number) => void
+	/** Loads in flight (files, Markdown); an export waits until there are none. */
+	pending: ShallowRef<number>
+	/** Counts `work` in `pending` until it settles. */
+	track: <T>(work: Promise<T>) => Promise<T>
 }
 
 export const CANVAS_CONTENT: InjectionKey<CanvasContent> = Symbol('jc-content')
@@ -61,6 +67,7 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 	const files = new Map<string, Promise<ResolvedFile>>()
 	const texts = new Map<string, Promise<string>>()
 	const fileVersion = shallowRef(0)
+	const pending = shallowRef(0)
 
 	/** `load(path)` once per path; a failure isn't kept, so the next card tries again. */
 	function cached<T>(cache: Map<string, Promise<T>>, path: string, load: () => T | Promise<T>): Promise<T> {
@@ -119,6 +126,11 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 		},
 		setHeight(key, height) {
 			amendSize(key, ({ width }) => ({ width, height: Math.round(height) }))
+		},
+		pending,
+		track(work) {
+			pending.value++
+			return work.finally(() => pending.value--)
 		},
 	}
 }
