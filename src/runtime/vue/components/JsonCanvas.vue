@@ -186,7 +186,12 @@ function onClipboard(e: ClipboardEvent) {
 	if (e.type === 'copy' ? actions.copy(data) : e.type === 'cut' ? actions.cut(data) : actions.paste(data)) e.preventDefault()
 }
 const CLIPBOARD_EVENTS = ['copy', 'cut', 'paste'] as const
-onMounted(() => CLIPBOARD_EVENTS.forEach(t => document.addEventListener(t, onClipboard)))
+/** Mounted in a browser: the empty canvas's hint names this platform's keys, which a server can't know. */
+const mounted = ref(false)
+onMounted(() => {
+	mounted.value = true
+	CLIPBOARD_EVENTS.forEach(t => document.addEventListener(t, onClipboard))
+})
 onBeforeUnmount(() => CLIPBOARD_EVENTS.forEach(t => document.removeEventListener(t, onClipboard)))
 
 /** A drop into a text being edited is the text's. */
@@ -284,7 +289,7 @@ defineExpose({
 			<CanvasOverlay :handles-for="handlesFor" :connection="connection" :ghosts="ghosts" :guides="guides" :scale="scale" />
 		</div>
 		<div v-if="marqueeStyle" class="jc-marquee" :style="marqueeStyle" />
-		<div v-if="!scene.nodes.length" class="jc-empty">
+		<div v-if="mounted && !scene.nodes.length" class="jc-empty">
 			<slot name="empty">
 				<p v-if="!readonly">
 					{{ messages.emptyDragFromBelow }}

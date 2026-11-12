@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Files come from `test/fixtures/vault`, served at `/vault/<path>`; to browse your own vault instead:
-// `JC_VAULT=/path/to/vault bun run dev`.
-import { parseCanvas, type CanvasSide, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
+// `JC_VAULT=/path/to/vault bun run dev`, or Open folder (Chromium), which also saves canvases back to it.
+import { parseCanvas, stringifyCanvas, type CanvasSide, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
 import BaseCard from '~/components/BaseCard.vue'
 import demo from '../../../test/fixtures/obsidian-demo.canvas?raw'
 import sample from '../../../test/fixtures/spec-sample.canvas?raw'
@@ -64,14 +64,55 @@ const canvases: Record<string, () => JSONCanvas> = {
 	'1,000 nodes': () => stress(1000),
 }
 const route = useRoute()
+const toast = useToast()
 const choice = ref(String(route.query.canvas ?? 'Obsidian demo'))
 const canvas = shallowRef(canvases[choice.value]!())
 watch(choice, (c) => {
+	folder.value = undefined
 	canvas.value = canvases[c]!()
 })
 const viewport = ref<Viewport>()
 
-const host = createVaultHost()
+// A local folder: its canvases are read from and saved back to it.
+const folder = shallowRef<CanvasFolder>()
+/** The folder's canvas chosen, and the one shown (once read). */
+const folderCanvas = ref<string>()
+const shownPath = ref<string>()
+const folderCanvases = computed(() => folder.value?.paths.value.filter(p => p.endsWith('.canvas')) ?? [])
+async function openFolder() {
+	const opened = await openCanvasFolder(path => (folderCanvas.value = path))
+	if (!opened) return
+	folder.value = opened
+	shownPath.value = folderCanvas.value = undefined
+	folderCanvas.value = folderCanvases.value[0]
+	if (!folderCanvas.value) toast.add({ title: `No canvas in “${opened.name}”` })
+}
+/** The document as read from the folder, so it isn't written straight back. */
+let read: JSONCanvas | undefined
+// `sync`: a folder opened again shows its first canvas again, though the choice ends where it was.
+watch(folderCanvas, async (path) => {
+	if (!path || !folder.value) return
+	try {
+		canvas.value = read = parseCanvas(await folder.value.read(path)).canvas
+		shownPath.value = path
+	}
+	catch (e) {
+		toast.add({ title: `Can't open ${path}`, description: String(e), color: 'error' })
+	}
+}, { flush: 'sync' })
+let saving = 0
+watch(canvas, (doc) => {
+	const f = folder.value, path = shownPath.value
+	if (!f || !path || doc === read) return
+	clearTimeout(saving)
+	saving = window.setTimeout(() => void f.write(path, stringifyCanvas(doc)), 500)
+})
+/** What's shown, so the editor starts afresh (and fitted) for each canvas. */
+const source = computed(() => (folder.value && shownPath.value ? `${folder.value.name}/${shownPath.value}` : choice.value))
+watch(source, () => (viewport.value = undefined))
+
+const vaultHost = createVaultHost()
+const host = computed(() => folder.value?.host ?? vaultHost)
 /** The sticky card (drawn by the `#node-sticky` slot below), offered in the bottom bar and the add menus. */
 const cardTemplates = [{ label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: 'New sticky', color: '3', width: 250, height: 160 } }]
 const editor = useTemplateRef('editor')
@@ -86,6 +127,8 @@ onMounted(() => {
 	<div class="h-dvh flex flex-col">
 		<div class="flex items-center gap-3 p-2 border-b border-default text-sm">
 			<USelect v-model="choice" :items="Object.keys(canvases)" class="w-48" />
+			<UButton size="sm" variant="outline" icon="i-lucide-folder-open" label="Open folder…" @click="openFolder" />
+			<USelect v-if="folder" v-model="folderCanvas" :items="folderCanvases" :placeholder="folder.name" class="w-64" />
 			<span class="text-muted tabular-nums">
 				{{ viewport ? `x ${viewport.x.toFixed(0)} · y ${viewport.y.toFixed(0)} · zoom ${viewport.zoom.toFixed(2)}` : '' }}
 			</span>
@@ -94,7 +137,7 @@ onMounted(() => {
 		</div>
 		<div class="flex-1 min-h-0">
 			<JsonCanvas
-				:key="choice"
+				:key="source"
 				ref="editor"
 				v-model="canvas"
 				v-model:viewport="viewport"

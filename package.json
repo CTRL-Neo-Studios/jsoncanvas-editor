@@ -1,10 +1,14 @@
 {
   "name": "@type32/jsoncanvas-editor",
   "version": "0.1.0",
-  "description": "A component that allows you to input and edit a JSON Canvas.",
-  "repository": "https://github.com/CTRL-Neo-Studios/jsoncanvas-editor",
+  "description": "An Obsidian-style JSON Canvas editor for Nuxt and Vue, built on Nuxt UI.",
+  "repository": "https://github.com/Type-32/jsoncanvas-editor-nuxt",
+  "keywords": ["json-canvas", "canvas", "obsidian", "nuxt", "nuxt-module", "vue", "nuxt-ui", "whiteboard"],
   "license": "MIT",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": {

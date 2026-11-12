@@ -1,84 +1,217 @@
-<!--
-Get your module up and running quickly.
-
-Find and replace all on all files (CMD+SHIFT+F):
-- Name: JSON Canvas Editor for Nuxt
-- Package name: @type32/jsoncanvas-editor
-- Description: A component that allows you to input and edit a JSON Canvas.
--->
-
-# JSON Canvas Editor for Nuxt
+# JSON Canvas Editor
 
 [![npm version][npm-version-src]][npm-version-href]
 [![npm downloads][npm-downloads-src]][npm-downloads-href]
 [![License][license-src]][license-href]
 [![Nuxt][nuxt-src]][nuxt-href]
 
-A component that allows you to input and edit a JSON Canvas.
+An editor for [JSON Canvas](https://jsoncanvas.org) files that works like Obsidian's Canvas, for Nuxt and Vue, built on [Nuxt UI](https://ui.nuxt.com).
 
-## Quick Setup
+- Reads and writes `.canvas` files the way Obsidian does (same formatting, so files edited in both diff cleanly), keeping any data it doesn't understand.
+- Text cards in Markdown, file cards (notes, images, video, audio, PDFs, other canvases), web pages, groups with backgrounds, and edges with labels, arrows and colors.
+- Obsidian's gestures, toolbar, menus, snapping, alignment, undo, copy and paste (to and from Obsidian too), and export as PNG.
+- Files come from your app through a small `host` object, so the editor works over a vault, a server, or the browser's file system.
+- Custom card types, replaceable chrome, and every string translatable.
 
-Install the module to your Nuxt application with one command:
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [`<JsonCanvas>`](#jsoncanvas): props, models, events, slots, methods
+- [The host](#the-host)
+- [Custom cards](#custom-cards)
+- [Chrome, menus and strings](#chrome-menus-and-strings)
+- [Clipboard and drops](#clipboard-and-drops)
+- [Export as PNG](#export-as-png)
+- [Theming](#theming)
+- [`/core`](#core)
+- [Keyboard and mouse](#keyboard-and-mouse)
+- [Development](#development)
+
+## Install
+
+### Nuxt
+
+Nuxt UI is required; follow its [installation](https://ui.nuxt.com/docs/getting-started/installation/nuxt), then add this module. The canvas's icons are [Lucide](https://lucide.dev)'s; installing them locally saves fetching them at runtime:
 
 ```bash
-bunx nuxi module add @type32/jsoncanvas-editor
+bun add @nuxt/ui tailwindcss @type32/jsoncanvas-editor
+bun add -D @iconify-json/lucide
 ```
-or
+
+```ts
+// nuxt.config.ts
+export default defineNuxtConfig({
+  modules: ['@nuxt/ui', '@type32/jsoncanvas-editor'],
+  css: ['~/assets/css/main.css'],
+})
+```
+
+```css
+/* app/assets/css/main.css */
+@import "tailwindcss";
+@import "@nuxt/ui";
+```
+
+```vue
+<!-- app/app.vue: Nuxt UI's tooltips, toasts and dialogs need <UApp> around the app -->
+<template>
+  <UApp>
+    <NuxtPage />
+  </UApp>
+</template>
+```
+
+The module registers `<JsonCanvas>` globally and adds its stylesheet. Types and helpers come from `@type32/jsoncanvas-editor/core` and `@type32/jsoncanvas-editor/vue`.
+
+### Vue + Vite
+
+Set up [Nuxt UI for Vue](https://ui.nuxt.com/docs/getting-started/installation/vue) (with `<UApp>` around the app), then:
+
 ```bash
 bun add @type32/jsoncanvas-editor
 ```
 
-That's it! You can now use JSON Canvas Editor in your Nuxt app ✨
-
-> [!WARNING]
-> Early rewrite towards Obsidian Canvas parity: see the [plan](https://github.com/CTRL-Neo-Studios/vertex/blob/dev/plans/Canvas%20Plan.md). The API below will change.
-
-### Usage (Nuxt)
-
-Add `@nuxt/ui` and this module to `nuxt.config.ts`; `<JsonCanvas>` is registered globally. It fills its parent:
-
-```vue
-<template>
-  <div class="h-dvh">
-    <JsonCanvas v-model="canvas" v-model:viewport="viewport" />
-  </div>
-</template>
-
-<script setup lang="ts">
-import { parseCanvas, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
-const canvas = shallowRef<JSONCanvas>(parseCanvas(fileText).canvas)
-const viewport = ref<Viewport>() // optional; without one the view fits the canvas
-</script>
+```ts
+import { JsonCanvas } from '@type32/jsoncanvas-editor/vue'
+import '@type32/jsoncanvas-editor/style.css'
 ```
 
-Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). `v-model:readonly`, `v-model:snapToGrid` and `v-model:snapToObjects` are also changed from the canvas's settings. Other props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`, `cardTemplates`, `modDragBehavior` (what Mod+drag on empty canvas makes: `'menu'`, `'card'`, `'file'`, `'media'`, `'webpage'` or `'group'`), `messages` and `toolbar` / `controls` / `cardBar` (`false` hides them). The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `actions`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()`, `refreshFiles()`, `exportPng()`, `openExport()` and `openHelp()`.
+## Quick start
 
-The chrome uses Nuxt UI (inside `<UApp>`, as Nuxt UI needs): a toolbar above the selection, controls at the right (settings, zoom, undo/redo, export, help), and a bar of cards to add at the bottom. Each can be hidden by prop or replaced by a slot (`#toolbar`, `#controls`, `#card-bar`, `#empty`), which gets `actions` (what the built-in chrome calls). Every string can be replaced through `messages` (`MESSAGES` lists them). Context menus can be extended from the `menu` event: push groups of Nuxt UI menu items onto `event.items` (`event.kind` is `canvas`, `node`, `edge` or `selection`).
+A canvas with file cards, its files served from `public/vault/`:
 
-`exportPng({ frame, scale, privacy, padding, watermark })` resolves to a PNG `Blob` of the whole canvas (`frame: 'full'`, the default, with `padding` 100 around the cards) or of what the view shows (`'viewport'`). `scale` is image pixels per canvas unit (default: the screen's pixel ratio, times the zoom for the viewport), lowered so no side passes 16,284 px. Every card in the frame is drawn with its content; web pages and PDFs, which can't be captured, show their placeholder. `privacy` draws text as bars, and the `#watermark` slot (a logo) is drawn at the bottom left unless `watermark: false`. With `host.saveImage(png)`, the controls offer Obsidian's Export as image dialog, which saves through it.
+```text
+public/vault/Board.canvas
+public/vault/Notes/Welcome.md
+public/vault/photo.jpg
+```
 
-`host` (a `CanvasHost`, every member optional) connects the canvas to the app around it; without a member, the canvas leaves out what needs it:
+```vue
+<!-- app/pages/index.vue -->
+<script setup lang="ts">
+import { parseCanvas, stringifyCanvas, type JSONCanvas } from '@type32/jsoncanvas-editor/core'
+import type { CanvasHost } from '@type32/jsoncanvas-editor/vue'
+
+const url = (path: string) => `/vault/${path.split('/').map(encodeURIComponent).join('/')}`
+
+// Where the canvas gets its files: whether one exists, its URL, and the text of notes.
+const host: CanvasHost = {
+  resolveFile: async path => ({ exists: (await fetch(url(path), { method: 'HEAD' })).ok, url: url(path) }),
+  readText: async path => (await fetch(url(path))).text(),
+}
+
+const canvas = shallowRef<JSONCanvas>()
+onMounted(async () => {
+  canvas.value = parseCanvas(await (await fetch(url('Board.canvas'))).text()).canvas
+})
+
+// Each edit arrives as a new document; write it wherever the file lives.
+watch(canvas, (doc, before) => {
+  if (doc && before) console.log(stringifyCanvas(doc))
+})
+</script>
+
+<template>
+  <div class="h-dvh">
+    <JsonCanvas v-if="canvas" v-model="canvas" :host="host" />
+  </div>
+</template>
+```
+
+`<JsonCanvas>` fills its parent, so give the parent a height. It's shown once the file is read, so the view fits it from the start. An empty canvas (`{ nodes: [], edges: [] }`, or `parseCanvas('')`) works too: double-click to add a card, or drag one from the bar at the bottom.
+
+## `<JsonCanvas>`
+
+### Models
+
+| Model | Type | |
+|---|---|---|
+| `v-model` | `JSONCanvas` (required) | The document. Edits come back as new objects (one per drag, key press or menu action); the object you pass is never changed. Passing a different document replaces the one shown and clears undo. |
+| `v-model:viewport` | `Viewport` (`{ x, y, zoom }`) | Where the view is (the world point at its centre, and log2 of the scale), set when the view comes to rest. Without one at mount, the view fits the canvas. |
+| `v-model:readonly` | `boolean` (`false`) | Nothing can be changed; selecting, panning, zooming, copying and exporting still work. Also toggled from the settings and the lock button. |
+| `v-model:snapToGrid` | `boolean` (`true`) | Moved and resized cards snap to the grid. |
+| `v-model:snapToObjects` | `boolean` (`true`) | Moved and resized cards snap to other cards' edges and centres. |
+
+Plain props work for the last three as well (`:readonly="true"`).
+
+### Props
+
+| Prop | Type (default) | |
+|---|---|---|
+| `host` | `CanvasHost` | What the canvas asks of your app: [the host](#the-host). |
+| `wheelBehavior` | `'pan'` \| `'zoom'` (`'pan'`) | What a plain mouse wheel does; the other happens with Mod or Space held. |
+| `cardLabels` | `'always'` \| `'hover'` \| `'never'` (`'always'`) | File names and URLs above file and link cards. |
+| `zoomBreakpoint` | `number` (`0`) | How much further out (log2 units) card content stays before placeholders show. |
+| `modDragBehavior` | `'menu'` \| `'card'` \| `'file'` \| `'media'` \| `'webpage'` \| `'group'` (`'menu'`) | What Mod+drag on empty canvas creates at the drawn size. |
+| `nodeRenderers` | `Record<string, Component>` | Cards by node type: replace `text`, `file`, `link` or `group`, or add your own types. |
+| `fileRenderers` | `Record<string, Component>` | File cards by extension (`{ base: BaseCard }`). |
+| `cardTemplates` | `CardTemplate[]` | Custom cards offered in the bottom bar and the add menus. |
+| `messages` | `Partial<CanvasMessages>` | Replacements for any of the canvas's strings. |
+| `toolbar`, `controls`, `cardBar` | `boolean` (`true`) | Show the floating selection toolbar, the controls at the right, and the bottom bar. |
+
+### Events
+
+| Event | Payload | |
+|---|---|---|
+| `menu` | `CanvasMenuEvent` | A context menu is about to open. `kind` is `'canvas'`, `'node'`, `'edge'` or `'selection'`, `key` the node or edge, `at` the world point. Push groups of Nuxt UI `DropdownMenuItem`s onto `items` to add to it. |
+| `update:*` | | The models above. |
+
+### Slots
+
+| Slot | Props | |
+|---|---|---|
+| `#node-<type>` | `NodeRendererProps` | A card for nodes of `type` (see [custom cards](#custom-cards)); wins over `nodeRenderers`. |
+| `#text-display` | `{ node, text }` | A text card's content, instead of the Markdown. |
+| `#text-editor` | `{ node, text, update, done }` | A text card's editor, instead of the textarea. `update(text)` as it's typed; `done()` ends editing. |
+| `#toolbar` | `{ actions }` | Replaces the floating toolbar. |
+| `#controls` | `{ settings, actions, openHelp, openExport }` | Replaces the controls. |
+| `#card-bar` | `{ actions, templates }` | Replaces the bottom bar. |
+| `#empty` | | Replaces the hint on an empty canvas. |
+| `#watermark` | | Drawn at the bottom left of exported images (a logo). |
+
+### Methods and state
+
+Through a template ref (`const editor = useTemplateRef('editor')`):
+
+| | |
+|---|---|
+| `canvas` | The document as shown. |
+| `issues` | `CanvasIssue[]`: what can't be shown as the spec intends (unknown node types without a card, invalid nodes and edges, edges to missing nodes, duplicate ids). |
+| `viewport` | The live viewport. |
+| `selected`, `select(keys)` | Keys of the selected nodes and edges (their ids, unless an id is shared). |
+| `addNode(fields)` | Adds a node of any type on top, selects it, returns its id. |
+| `undo()`, `redo()`, `canUndo`, `canRedo` | History (100 steps). |
+| `zoomToFit(jump?)`, `zoomToSelection()`, `zoomToBBox(box, jump?)`, `zoomBy(dz, at?)`, `setViewport(v)`, `screenToWorld({ clientX, clientY })` | The view. |
+| `refreshFiles(paths?)` | Forgets cached files (all, or `paths`), so cards showing them load again. Call it when files change outside the canvas. |
+| `exportPng(options?)` | A PNG `Blob` ([export](#export-as-png)). |
+| `openHelp()`, `openExport()` | The help and export dialogs. |
+| `actions` | `CanvasActions`: what the toolbar, menus and bars do, for chrome of your own: `toolbarItems`, `toolbarAnchor`, `setColor`, `removeSelection`, `createGroup`, `layout`, `setLineDirection`, `add`, `creationItems`, `createWithSize`, `menu`, `copy`, `cut`, `paste`. |
+
+## The host
+
+`host` connects the canvas to your app. Every member is optional; without one, the canvas leaves out what needs it (without `pickFile`, there's no Add file; without `readText`, notes show as file names).
 
 | Member | Used for |
 |---|---|
-| `resolveFile(path)` → `{ exists, name?, ext?, url? }` | file cards: missing files, and where images, video, audio and PDFs load from |
-| `readText(path)` | notes and canvases shown in cards |
-| `pickFile({ kinds? })` | Swap file, and Add file in a dropped edge's menu |
-| `listLinks(path)` → `{ file, subpath? }[]` | a note's links in a dropped edge's menu |
-| `openFile(path, subpath, newTab)` | double-click (or Mod+click) on a card's name, a click on a selected generic or canvas card |
-| `openLink(target)` | `[[wiki-links]]` in cards |
-| `importFiles(files)` → paths | files pasted or dropped onto the canvas (from the OS) become file cards |
-| `filesIn(data)` → paths | the app's own drags and pastes (rows from its file tree) become file cards; read `data` before any `await` |
-| `saveImage(png)` | saving an image from the Export as image dialog (without it, the dialog isn't offered) |
+| `resolveFile(path)` → `{ exists, name?, ext?, url? }` | File cards: missing files, and the URL images, video, audio and PDFs load from. Without it, every file counts as existing. |
+| `readText(path)` → `string` | Notes and canvases shown in cards. |
+| `pickFile({ kinds? })` → `path \| undefined` | Add file / Add media, Swap file, a group's background. `kinds`: `'markdown'`, `'image'`, `'video'`, `'audio'`, `'pdf'`, `'canvas'`, `'other'`. |
+| `listLinks(path)` → `{ file, subpath? }[]` | A note's links, offered when an edge from it is dropped on empty canvas. |
+| `openFile(path, subpath, newTab)` | Double-click (or Mod+click) on a card's name; a click on a selected canvas or other file card. |
+| `openLink(target)` | `[[wiki-links]]` clicked in cards. |
+| `importFiles(files)` → `paths` | Files pasted or dropped from the OS: store them, return their paths; they become file cards. |
+| `filesIn(data)` → `paths \| undefined` | Your app's own drags and pastes (rows from a file tree): the paths a `DataTransfer` carries. Read `data` before any `await`. |
+| `saveImage(png)` | Saves an image from the Export as image dialog; without it, the dialog isn't offered. |
 
-Loaded files are cached; call `refreshFiles(paths?)` when they change outside the canvas.
+Paths are whatever your app uses (Obsidian uses vault-relative paths like `Notes/Welcome.md`). Answers are cached per path until `refreshFiles`.
 
-#### Custom cards
+## Custom cards
 
-Any card can be replaced, and new node types added, with a component per `type` in `nodeRenderers`, or a `#node-<type>` slot (which wins):
+Any card can be replaced, and new node types added, with a component in `nodeRenderers` or a `#node-<type>` slot:
 
 ```vue
-<JsonCanvas v-model="canvas" :node-renderers="{ shape: ShapeCard }">
+<JsonCanvas v-model="canvas" :node-renderers="{ shape: ShapeCard }" :card-templates="templates">
   <template #node-sticky="{ node, editing, update, done }">
     <textarea v-if="editing" :value="node.note" @change="update({ note: $event.target.value })" @keydown.escape="done()" />
     <p v-else>{{ node.note }}</p>
@@ -86,80 +219,139 @@ Any card can be replaced, and new node types added, with a component per `type` 
 </JsonCanvas>
 ```
 
-A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves, one undo step; `undefined` removes a key) and `done()` (ends editing). The canvas moves, resizes, connects and snaps any card by its `x`, `y`, `width` and `height`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`, and `addNode({ type, x, y, width, height, ... })` adds one. To offer a custom card in the bottom bar and the add menus, pass `cardTemplates`: `[{ label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: '', width: 250, height: 160 } }]`. File cards can also be replaced per extension with `fileRenderers` (`{ base: BaseCard }`, props `node`, `file`, `host`), and a text card's Markdown or editor alone with the `#text-display` / `#text-editor` slots.
-
-### Usage (Vue + Vite)
-
-Set up [Nuxt UI for Vue](https://ui.nuxt.com/docs/getting-started/installation/vue), then:
-
 ```ts
-import { JsonCanvas } from '@type32/jsoncanvas-editor/vue'
-import '@type32/jsoncanvas-editor/style.css'
+const templates: CardTemplate[] = [
+  { label: 'Add sticky', icon: 'i-lucide-notebook-pen', node: { type: 'sticky', note: '', width: 250, height: 160 } },
+]
 ```
 
-Entry points: `@type32/jsoncanvas-editor/core` (read, write and lay out canvases; no Vue), `/vue` (components), `/style.css`. Theme it with the `--jc-*` CSS variables on `.jc-canvas`.
+A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves as one undo step; a key set to `undefined` is removed) and `done()` (ends editing). The canvas moves, resizes, connects, snaps, colors and copies any card by its `x`, `y`, `width`, `height` and `color`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`.
 
-The editor currently:
+File cards can be replaced per extension with `fileRenderers` (props `node`, `file` (the host's `ResolvedFile`), `host`).
 
-- Reads and writes JSON Canvas files as Obsidian does, keeping data it doesn't understand (listed in `issues`; unknown nodes show as placeholders)
-- Draws text, file, link and group nodes and edges with arrows, labels and colors, at Obsidian's geometry
-- Pans (wheel, Space+drag, middle or right drag) and zooms (Ctrl/Cmd+wheel, pinch), with card content replaced by placeholders when zoomed far out
-- Selects (click, Shift+click, drag a rectangle, Cmd/Ctrl+A), moves (groups carry what's inside; Shift locks an axis; Option/Ctrl drops copies), resizes, and snaps to the grid and to other cards with guides (Ctrl/Alt turns snapping off)
-- Arrow keys nudge, Delete removes, Shift+1 / Shift+2 zoom to fit / to the selection, Cmd/Ctrl+Z undoes and Cmd/Ctrl+Shift+Z (or +Y) redoes
-- Connects nodes by dragging from a side's dot; an edge dropped on empty canvas offers to add a card, a file (`host.pickFile`) or a note the source links to (`host.listLinks`). Dragging an edge moves its nearer end (dropped on nothing, it's removed). Clicking an edge selects it, clicking it again edits its label; its right-click menu edits the label, sets the line direction, follows it to the far end, or removes it
-- Shows text cards as Markdown (Obsidian's flavour without raw HTML; wiki-links go to `host.openLink`) and edits them on double-click (Escape or a click elsewhere saves). Double-clicking a card's bottom or right edge fits it to its text
-- Shows file cards by kind: notes (narrowed to a `#heading` or `#^block`), images and video (cards keep the media's shape), audio, PDFs (`#page=N`), other canvases as a minimap, and missing files with Swap file / Remove. Link cards show the page in a sandboxed frame (YouTube and X posts as their embeds). Groups show a background image (cover, repeat, or keep its ratio) and rename on double-click
-- Right-click menus for cards: Edit, Edit label, Swap file, Open in new tab, and for links Change URL, Open in browser, Copy URL, Reload page
-- A floating toolbar above the selection, by what's selected: Remove, Set color (presets or any color), Zoom to selection, Edit, Create group, Align (align, arrange, distribute, justify), Line direction, Edit/Remove label, Set/Edit a group's background
-- Right-click on empty canvas to add cards, files, media, web pages, groups or custom cards, undo/redo, select all, zoom to fit and toggle snapping and read-only; on a multi-selection for the toolbar's actions. Double-click empty canvas to add a card; Mod+drag to add one at the drawn size
-- Controls for settings, zoom, undo/redo and a help dialog of every gesture and key; a bottom bar to click or drag new cards in; a hint on an empty canvas
-- Copy, cut and paste cards with the edges among them (Obsidian's `obsidian/canvas` clipboard format, so cards copy to and from Obsidian, plus the JSON as plain text). Pasted text becomes a card, a pasted `http(s)` URL a web page, pasted or dropped files file cards (`host.importFiles`); the app's own drags through `host.filesIn`. A host without browser clipboard events (WebKit fires none with no text selected) can call `actions.copy(dataTransfer)` / `actions.paste(dataTransfer)` itself
-- Exports the canvas, or the view, as a PNG (privacy mode, a watermark slot)
+## Chrome, menus and strings
 
-Inspiration and reference implementations for rendering-only solutions:
+The chrome is Nuxt UI: the floating toolbar above the selection, the controls at the right (settings, zoom, undo/redo, export, help), and the bar of cards to add at the bottom. Each can be hidden (`:toolbar="false"`) or replaced by its slot, which gets `actions`.
 
-- `vue-json-canvas` by wujieli0207 [`github.com/wujieli0207/vue-json-canvas`](https://github.com/wujieli0207/vue-json-canvas)
-- `JSON-Canvas-Viewer` by Hesprs [`github.com/Hesprs/JSON-Canvas-Viewer`](https://github.com/Hesprs/JSON-Canvas-Viewer)
+Context menus can be extended from the `menu` event:
 
+```ts
+function onMenu(e: CanvasMenuEvent) {
+  if (e.kind === 'node') e.items.push([{ label: 'Reveal in files', icon: 'i-lucide-folder', onSelect: () => reveal(e.key!) }])
+}
+```
 
-## Contribution
+Every string is in `MESSAGES` (exported from `/vue`); pass any of them, translated, through `messages`. Placeholders such as `{file}` are filled in.
 
-<details>
-  <summary>Local development</summary>
-  
-  ```bash
-  # Install dependencies
-  bun install
-  
-  # Generate type stubs
-  bun run dev:prepare
-  
-  # Develop with the playground
-  bun run dev
-  
-  # Build the playground
-  bun run dev:build
-  
-  # Run Vitest
-  bun run test
-  bun run test:watch
-  
-  # Release new version
-  bun run release
-  ```
+## Clipboard and drops
 
-</details>
+Copy (Mod+C) and cut put the selected cards, with the edges among them, on the clipboard in Obsidian's format (`obsidian/canvas`), so they paste into Obsidian and back, and as JSON text. Paste (Mod+V) adds, in order of preference: your app's files (`host.filesIn`), files (`host.importFiles`, laid out in rows), copied cards (new ids, centred in the view), a web page for an `http(s)` URL, or a text card. Dropping onto the canvas does the same at the drop point.
 
+WebKit (Safari, Tauri on macOS) fires no copy or paste event without selected text. A host there can call `actions.copy(dataTransfer)`, `actions.cut(dataTransfer)` and `actions.paste(dataTransfer)` from its own shortcuts, with `new DataTransfer()` and its clipboard's text.
+
+## Export as PNG
+
+```ts
+const png = await editor.value!.exportPng({ frame: 'full', scale: 2, privacy: false })
+```
+
+| Option | Default | |
+|---|---|---|
+| `frame` | `'full'` | The whole canvas, or `'viewport'`: what the view shows. |
+| `scale` | the screen's pixel ratio (times the zoom for the viewport) | Image pixels per canvas unit; lowered so no side passes 16,284 px. |
+| `padding` | `100` | Around the cards (full canvas only). |
+| `privacy` | `false` | Draws every word as a bar. |
+| `watermark` | `true` | Includes the `#watermark` slot at the bottom left. |
+
+Every card in the frame is drawn with its content. Web pages and PDFs can't be captured, so they show their placeholder. With `host.saveImage`, the controls offer Obsidian's Export as image dialog.
+
+## Theming
+
+The canvas follows Nuxt UI's colors (`--ui-bg`, `--ui-text`, `--ui-primary`, ...), light and dark. Override these on `.jc-canvas` or an ancestor:
+
+| Variable | |
+|---|---|
+| `--jc-color-1` … `--jc-color-6` | The six preset colors (red, orange, yellow, green, cyan, purple). |
+| `--jc-default-color` | Cards and edges without a color. |
+| `--jc-accent` | Selection, handles and snap guides. |
+| `--jc-dot-color` | The background dots. |
+| `--jc-radius`, `--jc-shadow` | Cards' corners and shadow. |
+| `--jc-font` | The font (default: inherited). |
+
+The stylesheet is plain CSS with `jc-` classes; it uses no Tailwind utilities.
+
+## `/core`
+
+`@type32/jsoncanvas-editor/core` has no Vue dependency: use it on a server or in a worker.
+
+| | |
+|---|---|
+| **Types** | `JSONCanvas`, `JSONCanvasNode` (`…TextNode`, `…FileNode`, `…LinkNode`, `…GroupNode`), `JSONCanvasEdge`, `CanvasIssue`, `CanvasSide`, `CanvasEnd`, `CanvasColor`, `Viewport`, `BBox`, `Point`, `Rect` |
+| **Files** | `parseCanvas(text)` → `{ canvas, issues }` (throws on invalid JSON, so a broken file is never overwritten), `normalizeCanvas(data)`, `stringifyCanvas(canvas)` (Obsidian's formatting), `newId()` |
+| **Checks** | `isSupportedNode`, `isSupportedEdge`, `nodeBox`, `orderNodes` (groups behind, larger first) |
+| **Edits** | `removeFromCanvas`, `cloneNodes`, `raiseNodes`, `setBackground`, `copyClip` / `readClip` / `pasteClip` (the clipboard format), `CANVAS_CLIP_TYPE` |
+| **Layout** | `alignRects`, `distributeRects`, `justifyRects`, `arrangeRects`, `resizeBox`, `scaleBoxes`, `snap`, `gridSpacing`, `NODE_SIZE`, `GROUP_PADDING`, `MIN_NODE_SIZE` |
+| **Geometry** | `edgeGeometry` (Obsidian's curves and arrows), `bezierPoint`, `nearestSide`, `sideTowards`, `unionBBox`, `growBBox`, `intersectsBBox`, `containsBBox`, `centerOf` |
+| **View** | `fitViewport`, `zoomViewport`, `viewportBBox`, `viewportToWorld`, `clampZoom`, `MIN_ZOOM`, `MAX_ZOOM`, `ZOOM_BREAKPOINT`, `exportSize` |
+| **Content** | `fileKind(path)`, `fileName`, `fileExtension`, `fileLabel`, `markdownSection(text, subpath)` (a heading's section or a block), `embedUrl(url)` (YouTube and X embeds), `canvasMinimap(canvas)` |
+| **Colors** | `PRESET_COLORS`, `isPresetColor`, `normalizeColor`, `parseHexColor`, `isLightColor` |
+| **History** | `CanvasHistory` (snapshots with undo/redo) |
+
+## Keyboard and mouse
+
+Mod is ⌘ on macOS and Ctrl elsewhere. The canvas's help dialog (the ? control) lists these with the platform's key names.
+
+| Action | |
+|---|---|
+| Pan | Scroll; Space+drag; middle or right drag |
+| Pan horizontally | Shift+scroll |
+| Zoom | Mod+scroll, Space+scroll, pinch; the controls' + and − |
+| Zoom to fit / to the selection | Shift+1 / Shift+2 |
+| Select | Click; drag on empty canvas for a rectangle; Shift+click or Shift+drag to add or remove; Mod+A for all |
+| Move | Drag; Shift keeps to one axis; arrow keys nudge (Shift: 5 grid steps) |
+| Clone | Option+drag (macOS), Ctrl+drag (elsewhere) |
+| Snap off while dragging | Hold Ctrl (macOS), Alt (elsewhere) |
+| Resize | Drag an edge or corner; images and video keep their shape |
+| Add a card | Double-click empty canvas; drag from the bottom bar; Mod+drag on empty canvas for a size; right-click for the add menu |
+| Edit a text card | Double-click it; Escape or a click elsewhere saves |
+| Fit a card to its text | Double-click its bottom or right edge |
+| Connect | Drag from the dot on a card's side; drop on empty canvas to add a card there |
+| Edit an edge's label | Click a selected edge, or right-click it |
+| Rename a group | Double-click its label |
+| Open a file | Double-click its card's name (Mod+click: in a new tab) |
+| Remove | Delete or Backspace |
+| Undo / redo | Mod+Z / Mod+Shift+Z or Mod+Y |
+| Copy, cut, paste | Mod+C, Mod+X, Mod+V |
+| Menus | Right-click a card, an edge, the selection or empty canvas |
+
+## Development
+
+```bash
+bun install
+bun run dev:prepare   # type stubs
+bun run dev           # the playground, at http://localhost:3000
+bun run test          # Vitest
+bun run test:types    # vue-tsc
+bun run lint
+bun run release       # build, changelog, publish
+```
+
+The playground shows several canvases (Obsidian's demo, the spec's sample, every kind of card, unsupported data, 1,000 nodes) over the files in `test/fixtures/vault`. To use your own:
+
+- `JC_VAULT=/path/to/vault bun run dev` serves that folder instead;
+- **Open folder…** (Chromium) opens a local folder with the File System Access API: pick one of its canvases to edit; changes are saved back to the file.
+
+Inspiration and reference implementations for rendering-only solutions: [`vue-json-canvas`](https://github.com/wujieli0207/vue-json-canvas) by wujieli0207 and [`JSON-Canvas-Viewer`](https://github.com/Hesprs/JSON-Canvas-Viewer) by Hesprs.
 
 <!-- Badges -->
-[npm-version-src]: https://img.shields.io/npm/v/my-module/latest.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-version-href]: https://npmjs.com/package/my-module
+[npm-version-src]: https://img.shields.io/npm/v/@type32/jsoncanvas-editor/latest.svg?style=flat&colorA=020420&colorB=00DC82
+[npm-version-href]: https://npmjs.com/package/@type32/jsoncanvas-editor
 
-[npm-downloads-src]: https://img.shields.io/npm/dm/my-module.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-downloads-href]: https://npm.chart.dev/my-module
+[npm-downloads-src]: https://img.shields.io/npm/dm/@type32/jsoncanvas-editor.svg?style=flat&colorA=020420&colorB=00DC82
+[npm-downloads-href]: https://npm.chart.dev/@type32/jsoncanvas-editor
 
-[license-src]: https://img.shields.io/npm/l/my-module.svg?style=flat&colorA=020420&colorB=00DC82
-[license-href]: https://npmjs.com/package/my-module
+[license-src]: https://img.shields.io/npm/l/@type32/jsoncanvas-editor.svg?style=flat&colorA=020420&colorB=00DC82
+[license-href]: https://npmjs.com/package/@type32/jsoncanvas-editor
 
 [nuxt-src]: https://img.shields.io/badge/Nuxt-020420?logo=nuxt.js
 [nuxt-href]: https://nuxt.com
