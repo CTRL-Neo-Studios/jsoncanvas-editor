@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { parseCanvas, type CanvasSide, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
+import type { CanvasHost } from '@type32/jsoncanvas-editor/vue'
 import demo from '../../../test/fixtures/obsidian-demo.canvas?raw'
 import sample from '../../../test/fixtures/spec-sample.canvas?raw'
 
@@ -42,6 +43,12 @@ watch(choice, (c) => {
 	canvas.value = canvases[c]!()
 })
 const viewport = ref<Viewport>()
+
+/** Stands in for an app: the file picker asks for a path, and every note links to the same two places. */
+const host: CanvasHost = {
+	pickFile: async () => prompt('File path') || undefined,
+	listLinks: () => [{ file: 'Linked note.md' }, { file: 'Linked note.md', subpath: '#Heading' }],
+}
 const editor = useTemplateRef('editor')
 
 // For scripted checks (screenshots, frame timing).
@@ -61,7 +68,7 @@ onMounted(() => {
 			<span class="text-muted">{{ editor?.issues.length ? `${editor.issues.length} issue(s)` : '' }}</span>
 		</div>
 		<div class="flex-1 min-h-0">
-			<JsonCanvas :key="choice" ref="editor" v-model="canvas" v-model:viewport="viewport" />
+			<JsonCanvas :key="choice" ref="editor" v-model="canvas" v-model:viewport="viewport" :host="host" />
 		</div>
 	</div>
 </template>

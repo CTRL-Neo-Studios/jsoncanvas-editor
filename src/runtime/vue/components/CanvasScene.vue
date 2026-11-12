@@ -2,7 +2,9 @@
 import { computed } from 'vue'
 import { ARROW_POINTS, RESIZE_HANDLES, type BBox } from '../../core'
 import type { CardLabels, SceneEdge, SceneNode } from '../composables/useCanvasEditor'
+import type { LabelEditing } from '../composables/useCanvasInteraction'
 import { boxStyle } from '../utils/style'
+import CanvasEdgeLabel from './CanvasEdgeLabel.vue'
 import CanvasNode from './CanvasNode.vue'
 
 /** Everything in the world layer. Re-renders only when what's visible changes, not on every frame of a pan. */
@@ -12,16 +14,26 @@ const props = defineProps<{
 	selected: ReadonlySet<string>
 	/** Around a multi-selection; below the nodes, so they stay clickable. */
 	selectionBox?: BBox
+	labelEditing?: LabelEditing
 	contentHidden: boolean
 	cardLabels: CardLabels
 }>()
+const emit = defineEmits<{ labelDone: [key: string, text: string] }>()
 
-const labelled = computed(() => props.edges.filter(e => e.edge.label))
+const labelled = computed(() => props.edges.filter(e => e.edge.label || e.key === props.labelEditing?.key))
 </script>
 
 <template>
 	<svg class="jc-edges">
-		<g v-for="e in edges" :key="e.key" class="jc-edge" :class="e.color.class" :style="e.color.style" :data-id="e.edge.id">
+		<g
+			v-for="e in edges"
+			:key="e.key"
+			class="jc-edge"
+			:class="[e.color.class, { 'jc-selected': selected.has(e.key) }]"
+			:style="e.color.style"
+			:data-id="e.edge.id"
+			:data-edge="e.key"
+		>
 			<path class="jc-edge-hit" :d="e.shape.path" />
 			<path class="jc-edge-line" :d="e.shape.path" />
 		</g>
@@ -51,15 +63,11 @@ const labelled = computed(() => props.edges.filter(e => e.edge.label))
 		:content-hidden="contentHidden"
 		:card-labels="cardLabels"
 	/>
-	<div
+	<CanvasEdgeLabel
 		v-for="e in labelled"
 		:key="e.key"
-		class="jc-edge-label"
-		:class="e.color.class"
-		:style="[e.color.style, { transform: `translate(${e.shape.label.x}px, ${e.shape.label.y}px)` }]"
-	>
-		<div class="jc-edge-label-text">
-			{{ e.edge.label }}
-		</div>
-	</div>
+		:item="e"
+		:editing="labelEditing?.key === e.key ? labelEditing : undefined"
+		@done="text => emit('labelDone', e.key, text)"
+	/>
 </template>

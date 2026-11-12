@@ -25,6 +25,7 @@ export const SIDES: readonly CanvasSide[] = ['top', 'right', 'bottom', 'left']
 
 export const bboxOf = ({ x, y, width, height }: Rect): BBox => ({ minX: x, minY: y, maxX: x + width, maxY: y + height })
 export const rectOf = ({ minX, minY, maxX, maxY }: BBox): Rect => ({ x: minX, y: minY, width: maxX - minX, height: maxY - minY })
+export const pointBox = ({ x, y }: Point): BBox => ({ minX: x, minY: y, maxX: x, maxY: y })
 
 /** The smallest box around all of `boxes`; `undefined` for none. */
 export function unionBBox(boxes: Iterable<BBox>): BBox | undefined {
@@ -63,6 +64,14 @@ export function sidePoint(b: BBox, side: CanvasSide): Point {
 
 const OPPOSITE: Record<CanvasSide, CanvasSide> = { top: 'bottom', right: 'left', bottom: 'top', left: 'right' }
 export const oppositeSide = (side: CanvasSide): CanvasSide => OPPOSITE[side]
+
+/** A box of `size` placed so the midpoint of its `side` is at `p`: a node added at the loose end of an edge. */
+export function boxAtSide(p: Point, size: { width: number, height: number }, side: CanvasSide): BBox {
+	const { width: w, height: h } = size
+	const x = side === 'left' ? p.x : side === 'right' ? p.x - w : p.x - w / 2
+	const y = side === 'top' ? p.y : side === 'bottom' ? p.y - h : p.y - h / 2
+	return { minX: x, minY: y, maxX: x + w, maxY: y + h }
+}
 
 /** Outward direction of a side. */
 const NORMAL: Record<CanvasSide, Point> = { top: { x: 0, y: -1 }, right: { x: 1, y: 0 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 } }

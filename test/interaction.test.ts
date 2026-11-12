@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { JSONCanvas, JSONCanvasNode } from '../src/runtime/core'
+import type { JSONCanvas, JSONCanvasEdge, JSONCanvasNode } from '../src/runtime/core'
 import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
 import { IS_MAC } from '../src/runtime/vue/utils/platform'
+import DropdownMenuStub from './stubs/DropdownMenuStub.vue'
 
 /** The view is 1000 × 800 and centred on the world origin at 100%: client = world + (500, 400). */
 const W = 1000, H = 800
@@ -227,6 +228,166 @@ describe('keys and history', () => {
 		await key('ArrowRight')
 		expect(box('a')).toEqual([0, 0, 100, 50])
 		expect(selected()).toEqual(['a'])
+		expect(emits()).toBe(0)
+	})
+})
+
+describe('edges', () => {
+	const edges = () => (doc().edges ?? []) as JSONCanvasEdge[]
+	const nodeById = (id: string) => doc().nodes!.find(n => n.id === id) as JSONCanvasNode
+	/** Hovers node `key` at (x, y) and drags from its `side`'s connection point through `points`. */
+	async function connect(x: number, y: number, side: string, points: Array<[number, number]>) {
+		pointer('pointermove', root(), x, y)
+		await nextTick()
+		await drag(wrapper.find(`.jc-connect[data-connect="${side}"]`).element, points)
+	}
+	const hit = (key = 'e') => wrapper.find(`[data-edge="${key}"] .jc-edge-hit`).element
+	const menuItem = (label: string) => wrapper.find(`.menu-stub [data-label="${label}"]`)
+	/** Right-clicks `target`. Vue drops an event from the millisecond its listener was added, so the clock moves on first. */
+	function contextMenu(target: Element, x: number, y: number) {
+		vi.useFakeTimers({ toFake: ['Date'] })
+		vi.setSystemTime(Date.now() + 1000)
+		target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x + W / 2, clientY: y + H / 2 }))
+		vi.useRealTimers()
+		return nextTick()
+	}
+	const ab = { nodes: [card('a', 0, 0), card('b', 300, 0)], edges: [{ id: 'e', fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'left' }] } as JSONCanvas
+
+	it('connects to the nearest side of the node it\'s dropped on', async () => {
+		await setup({ nodes: [card('a', 0, 0), card('b', 300, 0, 100, 100)] })
+		await connect(50, 25, 'right', [[100, 25], [200, 40], [340, 90]])
+		expect(edges()).toHaveLength(1)
+		expect(edges()[0]).toMatchObject({ fromNode: 'a', fromSide: 'right', toNode: 'b', toSide: 'bottom' })
+		expect(Object.keys(edges()[0]!)).toEqual(['id', 'fromNode', 'fromSide', 'toNode', 'toSide'])
+		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(false)
+	})
+
+	it('never connects to a group around the node, or from a group to what it holds', async () => {
+		const g = { id: 'g', type: 'group', x: -50, y: -50, width: 500, height: 200 }
+		await setup({ nodes: [g, card('a', 0, 0)] })
+		await connect(50, 25, 'bottom', [[50, 50], [50, 120], [50, 145]]) // g's bottom midpoint is (200, 150)
+		expect(menuItem('Add card').exists()).toBe(true)
+		wrapper.findComponent(DropdownMenuStub).vm.$emit('update:open', false)
+		await nextTick()
+		await connect(-45, 100, 'top', [[200, -50], [10, 20], [5, 25]]) // from g, onto a's left side
+		expect(menuItem('Add card').exists()).toBe(true)
+	})
+
+	it('removes a dropped edge whose menu closes without a choice', async () => {
+		await setup({ nodes: [card('a', 0, 0)] })
+		await connect(50, 25, 'right', [[100, 25], [300, 25], [400, 25]])
+		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(true)
+		wrapper.findComponent(DropdownMenuStub).vm.$emit('update:open', false)
+		await nextTick()
+		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(false)
+		expect(edges()).toHaveLength(0)
+		expect(emits()).toBe(0)
+	})
+
+	it('adds a card from the drop menu, its facing side on the drop point', async () => {
+		await setup({ nodes: [card('a', 0, 0)] })
+		await connect(50, 25, 'right', [[100, 25], [300, 25], [400, 25]])
+		await menuItem('Add card').trigger('click')
+		await flushPromises()
+		const added = doc().nodes!.at(-1) as JSONCanvasNode
+		expect(added).toMatchObject({ type: 'text', text: '', x: 400, y: -5, width: 250, height: 60 })
+		expect(edges()[0]).toMatchObject({ fromNode: 'a', fromSide: 'right', toNode: added.id, toSide: 'left' })
+		expect(selected()).toEqual([added.id])
+		expect(wrapper.find('.jc-dragged-edge').exists()).toBe(false)
+	})
+
+	it('offers a note\'s links not yet connected, and picked files', async () => {
+		const f = { id: 'f', type: 'file', file: 'f.md', x: 0, y: 0, width: 100, height: 50 }
+		const b = { id: 'b', type: 'file', file: 'b.md', x: 300, y: 0, width: 100, height: 50 }
+		const host = {
+			listLinks: vi.fn(() => [{ file: 'b.md' }, { file: 'c.md' }, { file: 'c.md', subpath: '#H' }]),
+			pickFile: vi.fn(() => Promise.resolve('p.png')),
+		}
+		await setup({ nodes: [f, b], edges: [{ id: 'e', fromNode: 'f', toNode: 'b' }] }, { host })
+		await connect(50, 25, 'bottom', [[50, 50], [50, 200], [50, 300]])
+		await flushPromises()
+		expect(host.listLinks).toHaveBeenCalledWith('f.md')
+		expect(wrapper.findAll('.menu-stub button').map(b => b.attributes('data-label'))).toEqual(['Add card', 'Add file', 'c.md', 'c.md#H'])
+		await menuItem('c.md#H').trigger('click')
+		await flushPromises()
+		expect(doc().nodes!.at(-1)).toMatchObject({ type: 'file', file: 'c.md', subpath: '#H', x: -150, y: 300, width: 400, height: 400 })
+
+		await connect(50, 25, 'top', [[50, 0], [50, -150], [50, -300]])
+		await flushPromises()
+		await menuItem('Add file').trigger('click')
+		await flushPromises()
+		expect(doc().nodes!.at(-1)).toMatchObject({ type: 'file', file: 'p.png' })
+		expect(edges()).toHaveLength(3)
+	})
+
+	it('moves the nearer end to another node, never onto the other end\'s node, and removes it dropped on nothing', async () => {
+		await setup({ ...ab, nodes: [...ab.nodes!, card('c', 300, 200)] })
+		await drag(hit(), [[280, 25], [300, 120], [345, 195]])
+		expect(edges()[0]).toMatchObject({ fromNode: 'a', fromSide: 'right', toNode: 'c', toSide: 'top' })
+		await drag(hit(), [[300, 190], [200, 100], [95, 25]]) // onto a, the fixed end
+		expect(edges()).toHaveLength(0)
+	})
+
+	it('cancels a reconnect with Esc', async () => {
+		await setup(ab)
+		await drag(hit(), [[280, 25], [250, 100], [250, 300]], {}, true)
+		expect(wrapper.find('[data-edge="e"]').exists()).toBe(false)
+		await key('Escape')
+		expect(edges()).toEqual(ab.edges)
+		expect(emits()).toBe(0)
+	})
+
+	it('selects on click, edits the label on a second click, and removes an emptied label', async () => {
+		await setup(ab)
+		await click(hit(), 200, 25)
+		expect(selected()).toEqual(['e'])
+		await click(hit(), 200, 25)
+		const editor = wrapper.find('[contenteditable]')
+		editor.element.textContent = 'Label'
+		await editor.trigger('blur')
+		expect(edges()[0]!.label).toBe('Label')
+		await click(wrapper.find('.jc-edge-label').element, 200, 25)
+		const again = wrapper.find('[contenteditable]')
+		again.element.textContent = '  '
+		await again.trigger('blur')
+		expect('label' in edges()[0]!).toBe(false)
+	})
+
+	it('deletes selected edges with Delete, keeping their nodes', async () => {
+		await setup(ab)
+		await click(hit(), 200, 25)
+		await key('Delete')
+		expect(edges()).toHaveLength(0)
+		expect(doc().nodes).toHaveLength(2)
+	})
+
+	it('sets the line direction and removes from the context menu', async () => {
+		await setup(ab)
+		await contextMenu(hit(), 200, 25)
+		expect(selected()).toEqual(['e'])
+		await menuItem('Bidirectional').trigger('click')
+		expect(edges()[0]).toMatchObject({ fromEnd: 'arrow' })
+		expect('toEnd' in edges()[0]!).toBe(false)
+		await contextMenu(hit(), 200, 25)
+		await menuItem('Nondirectional').trigger('click')
+		expect(edges()[0]).toMatchObject({ toEnd: 'none' })
+		expect('fromEnd' in edges()[0]!).toBe(false)
+		await contextMenu(hit(), 200, 25)
+		await menuItem('Remove').trigger('click')
+		expect(edges()).toHaveLength(0)
+		expect(nodeById('a')).toBeDefined()
+	})
+
+	it('only selects when read-only', async () => {
+		await setup(ab, { readonly: true })
+		pointer('pointermove', root(), 50, 25)
+		await nextTick()
+		expect(wrapper.find('.jc-connect').exists()).toBe(false)
+		await drag(hit(), [[280, 25], [250, 100], [250, 300]])
+		await click(hit(), 200, 25)
+		await click(hit(), 200, 25)
+		expect(wrapper.find('[contenteditable]').exists()).toBe(false)
+		expect(selected()).toEqual(['e'])
 		expect(emits()).toBe(0)
 	})
 })

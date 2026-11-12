@@ -1,17 +1,44 @@
+import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
-	cloneNodes, containsBBox, gridSpacing, growBBox, intersectsBBox, lockAxis, MIN_NODE_SIZE, nodeBox, raiseNodes,
-	removeFromCanvas, resizeBox, resizeSnapSource, scaleBoxes, snap, unionBBox,
-	type BBox, type JSONCanvas, type Point, type ResizeHandle, type SnapGuide,
+	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, edgeGeometry, gridSpacing, growBBox, intersectsBBox, lockAxis,
+	MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, oppositeSide, pointBox, raiseNodes, removeFromCanvas, resizeBox,
+	resizeSnapSource, scaleBoxes, snap, unionBBox,
+	type BBox, type CanvasEnd, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
+	type ResizeHandle, type SnapGuide,
 } from '../../core'
+import type { CanvasHost, CanvasLink } from '../host'
+import { colorBinding, type ColorBinding } from '../utils/color'
 import { startDrag, type DragHandlers, type DragPoint } from '../utils/drag'
 import { isCloneKey, isMod, isNoSnapKey } from '../utils/platform'
-import type { CanvasEditor, SceneNode } from './useCanvasEditor'
+import type { CanvasEditor, SceneEdge, SceneNode } from './useCanvasEditor'
 
 export interface InteractionOptions {
 	readonly: () => boolean
 	snapToGrid: () => boolean
 	snapToObjects: () => boolean
+	host: () => CanvasHost | undefined
+}
+
+/** An edge being drawn from a node or moved to another. */
+export interface DraggedEdge {
+	shape: EdgeGeometry
+	color: ColorBinding
+}
+
+/** A menu open at a point in the canvas (px from its top left). */
+export interface CanvasMenu {
+	x: number
+	y: number
+	items: DropdownMenuItem[][]
+	/** Runs once the menu closes, after the chosen item's `onSelect`. */
+	onClose?: () => void
+}
+
+/** An edge label being edited; `at` (client px) is where it was clicked, for the caret. */
+export interface LabelEditing {
+	key: string
+	at?: { x: number, y: number }
 }
 
 /** What the pointer and keyboard do to the canvas, and what they show while doing it. */
@@ -27,9 +54,16 @@ export interface CanvasInteraction {
 	guides: ShallowRef<SnapGuide[]>
 	/** Where copies will land while a drag clones. */
 	ghosts: ShallowRef<BBox[]>
+	connection: ShallowRef<DraggedEdge | undefined>
+	labelEditing: ShallowRef<LabelEditing | undefined>
+	/** Ends editing a label with its text; an empty one removes the label. */
+	finishLabel: (key: string, text: string) => void
+	menu: ShallowRef<CanvasMenu | undefined>
+	closeMenu: () => void
 	onPointerDown: (e: PointerEvent) => void
 	onPointerMove: (e: PointerEvent) => void
 	onPointerLeave: () => void
+	onContextMenu: (e: MouseEvent) => void
 	onKeyDown: (e: KeyboardEvent) => void
 }
 
@@ -39,10 +73,46 @@ type Edit = Pick<DragHandlers, 'move' | 'end' | 'cancel'>
 const SELECTION_PADDING = 10
 const HOVER_TOLERANCE = 8
 const NUDGE_MULTIPLIER = 5
+/** Links offered in a dropped edge's menu. */
+const MAX_LINKS = 20
+const NO_COLOR = colorBinding(undefined)
+
+/** Line directions, by the ends they give an edge. */
+const DIRECTIONS: Array<{ label: string, fromEnd: CanvasEnd, toEnd: CanvasEnd }> = [
+	{ label: 'Nondirectional', fromEnd: 'none', toEnd: 'none' },
+	{ label: 'Unidirectional', fromEnd: 'none', toEnd: 'arrow' },
+	{ label: 'Bidirectional', fromEnd: 'arrow', toEnd: 'arrow' },
+]
+
+/** A node side an edge end can attach to. */
+interface Attachment {
+	node: SceneNode
+	side: CanvasSide
+}
+
+/** What a dropped edge's menu adds. */
+type NewNode = { type: 'text', text: string } | { type: 'file', file: string, subpath?: string }
 
 const translate = (b: BBox, d: Point): BBox => ({ minX: b.minX + d.x, minY: b.minY + d.y, maxX: b.maxX + d.x, maxY: b.maxY + d.y })
 const width = (b: BBox) => b.maxX - b.minX
 const height = (b: BBox) => b.maxY - b.minY
+const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
+const linkKey = (l: { file?: unknown, subpath?: unknown }) => `${l.file}${l.subpath ?? ''}`
+
+/**
+ * `edge` with the ends a line direction gives it, keys in the order Obsidian writes them (ends before color and
+ * label); defaults (`fromEnd: none`, `toEnd: arrow`) left out.
+ */
+function withEnds(edge: JSONCanvasEdge, fromEnd: CanvasEnd, toEnd: CanvasEnd): JSONCanvasEdge {
+	const { fromEnd: _from, toEnd: _to, color, label, ...rest } = edge
+	return {
+		...rest,
+		...(fromEnd !== 'none' && { fromEnd }),
+		...(toEnd !== 'arrow' && { toEnd }),
+		...(color !== undefined && { color }),
+		...(label !== undefined && { label }),
+	}
+}
 
 /** `doc` with the nodes at `indices` set to `boxes` (rounded, as Obsidian stores them). */
 function placed(doc: JSONCanvas, indices: readonly number[], boxes: readonly BBox[]): JSONCanvas {
@@ -61,9 +131,18 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 	const guides = shallowRef<SnapGuide[]>([])
 	const ghosts = shallowRef<BBox[]>([])
 	const dragging = ref(false)
+	const connection = shallowRef<DraggedEdge>()
+	const labelEditing = shallowRef<LabelEditing>()
+	const menu = shallowRef<CanvasMenu>()
 
 	const world = (p: { clientX: number, clientY: number }) => viewport.screenToWorld(p)
+	/** Where a client point is in the canvas element. */
+	const local = (p: { clientX: number, clientY: number }) => {
+		const r = el.value!.getBoundingClientRect()
+		return { x: p.clientX - r.left, y: p.clientY - r.top }
+	}
 	const selectedItems = computed(() => [...editor.selected.value].flatMap(k => scene.value.byKey.get(k) ?? []))
+	const selectedEdges = computed(() => [...editor.selected.value].flatMap(k => scene.value.edgeByKey.get(k) ?? []))
 	const selectionBox = computed(() => {
 		const items = selectedItems.value
 		return items.length > 1 ? growBBox(unionBBox(items.map(i => i.box))!, SELECTION_PADDING) : undefined
@@ -234,9 +313,232 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		}))
 	}
 
+	/** Where an edge end dragged to `p` attaches: the nearest side of a node within reach that `skip` doesn't rule out. */
+	function attachment(p: Point, skip: (n: SceneNode) => boolean): Attachment | undefined {
+		const reach = growBBox(pointBox(p), CONNECT_DISTANCE)
+		const nodes = editor.visibleNodes.value.filter(n => typeof n.node.id === 'string' && intersectsBBox(n.box, reach) && !skip(n))
+		const hit = nearestSide(p, nodes.map(n => n.box))
+		return hit && { node: nodes[hit.index]!, side: hit.side }
+	}
+
+	/** A new edge from `source`'s `side`; dropped away from any node, it opens a menu of what to add there. */
+	function beginConnect(source: SceneNode, side: CanvasSide): Edit | undefined {
+		const fromNode = source.node.id
+		if (o.readonly() || typeof fromNode !== 'string') return
+		editor.select([])
+		const loose = oppositeSide(side)
+		// Not to itself, a group around it, or (from a group) anything in the group.
+		const skip = (n: SceneNode) => n === source
+			|| (n.kind === 'group' && containsBBox(n.box, source.box))
+			|| (source.kind === 'group' && containsBBox(source.box, n.box))
+		let target: Attachment | undefined
+		return {
+			move(p) {
+				const w = world(p)
+				target = attachment(w, skip)
+				connection.value = { shape: edgeGeometry(source.box, side, target?.node.box ?? pointBox(w), target?.side ?? loose), color: NO_COLOR }
+			},
+			end(p) {
+				if (!target) return void openDropMenu(source, side, world(p), p)
+				connection.value = undefined
+				const doc = editor.canvas.value
+				const edge: JSONCanvasEdge = { id: newId(), fromNode, fromSide: side, toNode: target.node.node.id as string, toSide: target.side }
+				editor.commit({ ...doc, edges: [...doc.edges ?? [], edge] })
+			},
+			cancel: () => {
+				connection.value = undefined
+			},
+		}
+	}
+
+	/** The menu for an edge from `source` dropped at `at`: add a card, a file, or a note the source links to. */
+	async function openDropMenu(source: SceneNode, side: CanvasSide, at: Point, client: DragPoint) {
+		const host = o.host(), doc = editor.canvas.value
+		const fromNode = source.node.id as string
+		const loose = oppositeSide(side)
+		let links: CanvasLink[] = []
+		if (source.kind === 'file' && host?.listLinks) {
+			const byId = new Map((doc.nodes ?? []).map(n => [n.id, n]))
+			const connected = new Set((doc.edges ?? []).flatMap((e) => {
+				const n = e.fromNode === fromNode ? byId.get(e.toNode) : undefined
+				return n?.type === 'file' ? [linkKey(n)] : []
+			}))
+			try {
+				links = (await host.listLinks(source.node.file as string)).filter(l => !connected.has(linkKey(l))).slice(0, MAX_LINKS)
+			}
+			catch (error) {
+				connection.value = undefined
+				throw error
+			}
+		}
+		let chosen = false
+		/** Adds what `pick` gives (nothing if it gives nothing), its `loose` side's midpoint on the drop point, connected. */
+		const add = (pick: () => NewNode | undefined | Promise<NewNode | undefined>) => async () => {
+			chosen = true
+			try {
+				const fields = await pick()
+				if (!fields) return
+				const b = boxAtSide(at, NODE_SIZE[fields.type], loose)
+				const node = { id: newId(), x: Math.round(b.minX), y: Math.round(b.minY), width: width(b), height: height(b), ...fields }
+				const now = editor.canvas.value
+				editor.commit({
+					...now,
+					nodes: [...now.nodes ?? [], node],
+					edges: [...now.edges ?? [], { id: newId(), fromNode, fromSide: side, toNode: node.id, toSide: loose }],
+				})
+				editor.select([node.id])
+			}
+			finally {
+				connection.value = undefined
+			}
+		}
+		const { pickFile } = host ?? {}
+		const actions: DropdownMenuItem[] = [{ label: 'Add card', icon: 'i-lucide-sticky-note', onSelect: add(() => ({ type: 'text', text: '' })) }]
+		if (pickFile) {
+			actions.push({ label: 'Add file', icon: 'i-lucide-file-plus', onSelect: add(async () => {
+				const file = await pickFile()
+				return file ? { type: 'file', file } : undefined
+			}) })
+		}
+		const linkItems: DropdownMenuItem[] = links.map(l => ({
+			label: linkKey(l),
+			icon: 'i-lucide-file',
+			onSelect: add(() => ({ type: 'file', file: l.file, ...(l.subpath && { subpath: l.subpath }) })),
+		}))
+		menu.value = {
+			...local(client),
+			items: linkItems.length ? [actions, linkItems] : [actions],
+			onClose: () => {
+				if (!chosen) connection.value = undefined
+			},
+		}
+	}
+
+	/** Moves the end of `item` nearer to `down`; dropped away from any node, the edge is removed. */
+	function beginReconnect(item: SceneEdge, down: Point): Edit | undefined {
+		if (o.readonly()) return
+		editor.select([])
+		const { edge } = item
+		const end = distance(down, item.shape.start) > distance(down, item.shape.end) ? 'to' : 'from'
+		const fixed = end === 'to' ? edge.fromNode : edge.toNode
+		const before = editor.canvas.value
+		const without = { ...before, edges: before.edges!.filter(e => e !== edge) }
+		editor.preview(without)
+		let target: Attachment | undefined
+		return {
+			move(p) {
+				const w = world(p)
+				target = attachment(w, n => n.node.id === fixed)
+				const box = target?.node.box ?? pointBox(w)
+				const shape = end === 'to'
+					? edgeGeometry(item.from, edge.fromSide!, box, target?.side ?? edge.toSide!, edge.fromEnd, edge.toEnd)
+					: edgeGeometry(box, target?.side ?? edge.fromSide!, item.to, edge.toSide!, edge.fromEnd, edge.toEnd)
+				connection.value = { shape, color: item.color }
+			},
+			end() {
+				connection.value = undefined
+				if (!target) return editor.commit(without)
+				const moved = { ...edge, [`${end}Node`]: target.node.node.id as string, [`${end}Side`]: target.side }
+				editor.commit({ ...before, edges: before.edges!.map(e => (e === edge ? moved : e)) })
+			},
+			cancel() {
+				connection.value = undefined
+				editor.preview(before)
+			},
+		}
+	}
+
+	function toggle(key: string) {
+		const next = new Set(editor.selected.value)
+		if (!next.delete(key)) next.add(key)
+		editor.select(next)
+	}
+
+	function editLabel(key: string, at?: LabelEditing['at']) {
+		if (!o.readonly()) labelEditing.value = { key, at }
+	}
+
+	function finishLabel(key: string, text: string) {
+		labelEditing.value = undefined
+		const edge = scene.value.edgeByKey.get(key)?.edge
+		const label = text.trim()
+		if (!edge || label === (edge.label ?? '')) return
+		const { label: _, ...rest } = edge
+		const doc = editor.canvas.value
+		editor.commit({ ...doc, edges: doc.edges!.map(e => (e === edge ? (label ? { ...edge, label } : rest) : e)) })
+	}
+
+	/** A click on an edge (or its label, `at`) selects it; on the only selected edge, edits its label. */
+	function clickEdge(key: string, p: DragPoint, at?: LabelEditing['at']) {
+		const sel = editor.selected.value
+		if (p.shiftKey) toggle(key)
+		else if (sel.size === 1 && sel.has(key)) editLabel(key, at)
+		else editor.select([key])
+	}
+
+	function setLineDirection(edges: readonly JSONCanvasEdge[], fromEnd: CanvasEnd, toEnd: CanvasEnd) {
+		const doc = editor.canvas.value
+		editor.commit({ ...doc, edges: doc.edges!.map(e => (edges.includes(e as JSONCanvasEdge) ? withEnds(e as JSONCanvasEdge, fromEnd, toEnd) : e)) })
+	}
+
+	function onContextMenu(e: MouseEvent) {
+		const key = (e.target as Element).closest<HTMLElement>('[data-edge]')?.dataset.edge
+		const item = key && scene.value.edgeByKey.get(key)
+		if (!item) return
+		e.preventDefault()
+		// ponytail: an edge in a multi-selection gets no menu until the selection menu (C6).
+		if (editor.selected.value.size > 1 && editor.selected.value.has(key)) return
+		const edit = !o.readonly()
+		if (edit) editor.select([key])
+		const { edge } = item
+		const at = world(e)
+		const far = distance(at, item.shape.start) < distance(at, item.shape.end) ? item.to : item.from
+		const follow: DropdownMenuItem = { label: 'Follow connection', icon: 'i-lucide-corner-down-right', onSelect: () => viewport.zoomToBBox(far) }
+		const fromEnd = edge.fromEnd ?? 'none', toEnd = edge.toEnd ?? 'arrow'
+		menu.value = {
+			...local(e),
+			items: edit
+				? [
+						[
+							{ label: 'Edit label', icon: 'i-lucide-pencil', onSelect: () => editLabel(key) },
+							{
+								label: 'Line direction',
+								icon: 'i-lucide-move-horizontal',
+								children: DIRECTIONS.map(d => ({
+									label: d.label,
+									type: 'checkbox' as const,
+									checked: d.fromEnd === fromEnd && d.toEnd === toEnd,
+									onSelect: () => setLineDirection([edge], d.fromEnd, d.toEnd),
+								})),
+							},
+							follow,
+						],
+						[{ label: 'Remove', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => remove(new Set(), new Set([edge])) }],
+					]
+				: [[follow]],
+		}
+	}
+
+	function closeMenu() {
+		const m = menu.value
+		menu.value = undefined
+		m?.onClose?.()
+	}
+
 	function onPointerDown(e: PointerEvent) {
 		if (viewport.onPointerDown(e) || e.button !== 0) return
 		const target = e.target as Element
+		if (target.closest('[contenteditable]')) return // typing in a label
+		const connect = target.closest<HTMLElement>('[data-connect]')
+		const source = connect && scene.value.byKey.get(connect.parentElement!.dataset.owner!)
+		if (source) return drag(e, () => beginConnect(source, connect.dataset.connect as CanvasSide), () => editor.select([source.key]))
+		const edgeEl = target.closest<HTMLElement>('[data-edge]')
+		const edge = edgeEl && scene.value.edgeByKey.get(edgeEl.dataset.edge!)
+		if (edge) {
+			// A label can be clicked into but not dragged.
+			const onLabel = edgeEl.classList.contains('jc-edge-label')
+			return drag(e, () => (onLabel ? undefined : beginReconnect(edge, world(e))), p => clickEdge(edge.key, p, onLabel ? { x: p.clientX, y: p.clientY } : undefined))
+		}
 		const handle = target.closest<HTMLElement>('[data-resize]')
 		if (handle) {
 			const h = handle.dataset.resize as ResizeHandle
@@ -267,10 +569,8 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 				return beginMove(e)
 			},
 			(p) => {
-				if (!p.shiftKey) return editor.select([key])
-				const next = new Set(editor.selected.value)
-				if (!next.delete(key)) next.add(key)
-				editor.select(next)
+				if (p.shiftKey) toggle(key)
+				else editor.select([key])
 			},
 		)
 	}
@@ -294,10 +594,9 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		editor.commit(placed(doc, indices, items.map(i => translate(i.box, { x: dx, y: dy }))))
 	}
 
-	function remove() {
-		const nodes = new Set(selectedItems.value.map(i => i.node))
-		if (!nodes.size) return
-		editor.commit(removeFromCanvas(editor.canvas.value, nodes))
+	function remove(nodes: ReadonlySet<SceneNode['node']>, edges: ReadonlySet<JSONCanvasEdge>) {
+		if (!nodes.size && !edges.size) return
+		editor.commit(removeFromCanvas(editor.canvas.value, nodes, edges))
 		editor.select([])
 	}
 
@@ -323,7 +622,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 			editor.zoomToSelection()
 		}
 		else if (e.key === 'Delete' || e.key === 'Backspace') {
-			if (edit) remove()
+			if (edit) remove(new Set(selectedItems.value.map(i => i.node)), new Set(selectedEdges.value.map(i => i.edge)))
 		}
 		else if (ARROWS[e.key] && !isMod(e)) {
 			const step = gridSpacing(viewport.view.zoom) * (e.shiftKey ? NUDGE_MULTIPLIER : 1)
@@ -336,8 +635,8 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 	}
 
 	return {
-		hovered, handlesFor, selectionBox, marquee, guides, ghosts,
-		onPointerDown, onPointerMove, onKeyDown,
+		hovered, handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEditing, finishLabel, menu, closeMenu,
+		onPointerDown, onPointerMove, onContextMenu, onKeyDown,
 		onPointerLeave: () => {
 			hovered.value = undefined
 		},

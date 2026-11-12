@@ -4,6 +4,8 @@ import { gridSpacing, type JSONCanvas, type Viewport } from '../../core'
 import { useCanvasEditor, type CardLabels } from '../composables/useCanvasEditor'
 import { useCanvasInteraction } from '../composables/useCanvasInteraction'
 import type { WheelBehavior } from '../composables/useViewport'
+import type { CanvasHost } from '../host'
+import CanvasMenu from './CanvasMenu.vue'
 import CanvasOverlay from './CanvasOverlay.vue'
 import CanvasScene from './CanvasScene.vue'
 
@@ -20,7 +22,9 @@ const props = withDefaults(defineProps<{
 	cardLabels?: CardLabels
 	/** How much further out (log2 zoom units) card content stays before placeholders show. */
 	zoomBreakpoint?: number
-}>(), { readonly: false, snapToGrid: true, snapToObjects: true, wheelBehavior: 'pan', cardLabels: 'always', zoomBreakpoint: 0 })
+	/** What the canvas can ask of the app: files to pick, links to offer. */
+	host?: CanvasHost
+}>(), { readonly: false, snapToGrid: true, snapToObjects: true, wheelBehavior: 'pan', cardLabels: 'always', zoomBreakpoint: 0, host: undefined })
 
 /**
  * The document. A new one replaces it (and clears undo); edits are emitted as new objects, never by changing the
@@ -47,10 +51,11 @@ const interaction = useCanvasInteraction(el, editor, {
 	readonly: () => props.readonly,
 	snapToGrid: () => props.snapToGrid,
 	snapToObjects: () => props.snapToObjects,
+	host: () => props.host,
 })
 const { visibleNodes, visibleEdges, zoomedOut, contentHidden, selected } = editor
 const { view, size, scale, settledZoom, spaceHeld, panning, moving } = editor.viewport
-const { handlesFor, selectionBox, marquee, guides, ghosts } = interaction
+const { handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEditing, menu } = interaction
 
 // Compared by value: the parent may hand back what was emitted as a different (reactive) object.
 watch(viewportModel, (v) => {
@@ -80,7 +85,7 @@ const marqueeStyle = computed(() => {
 })
 
 function onPointerDown(e: PointerEvent) {
-	el.value?.focus({ preventScroll: true })
+	if (!(e.target as Element).closest('[contenteditable]')) el.value?.focus({ preventScroll: true })
 	interaction.onPointerDown(e)
 }
 
@@ -95,7 +100,7 @@ defineExpose({
 	/** What in the document can't be shown as the spec intends. */
 	issues: editor.issues,
 	viewport: view,
-	/** Keys of the selected nodes (their ids, unless an id is shared). */
+	/** Keys of the selected nodes and edges (their ids, unless an id is shared). */
 	selected,
 	select: editor.select,
 	undo: editor.undo,
@@ -115,7 +120,7 @@ defineExpose({
 	<div
 		ref="el"
 		class="jc-canvas"
-		:class="{ 'jc-zoomed-out': zoomedOut, 'jc-space': spaceHeld, 'jc-panning': panning, 'jc-moving': moving, 'jc-readonly': readonly }"
+		:class="{ 'jc-zoomed-out': zoomedOut, 'jc-space': spaceHeld, 'jc-panning': panning, 'jc-moving': moving, 'jc-readonly': readonly, 'jc-connecting': !!connection }"
 		:style="{ '--jc-zoom-multiplier': zoomMultiplier }"
 		tabindex="-1"
 		@wheel="editor.viewport.onWheel"
@@ -123,6 +128,7 @@ defineExpose({
 		@pointermove="interaction.onPointerMove"
 		@pointerleave="interaction.onPointerLeave"
 		@contextmenu.capture="editor.viewport.onContextMenu"
+		@contextmenu="interaction.onContextMenu"
 		@keydown="onKeyDown"
 		@keyup="editor.viewport.onKeyUp"
 		@blur="spaceHeld = false"
@@ -141,11 +147,14 @@ defineExpose({
 				:edges="visibleEdges"
 				:selected="selected"
 				:selection-box="selectionBox"
+				:label-editing="labelEditing"
 				:content-hidden="contentHidden"
 				:card-labels="cardLabels"
+				@label-done="interaction.finishLabel"
 			/>
-			<CanvasOverlay :handles-for="handlesFor" :ghosts="ghosts" :guides="guides" :scale="scale" />
+			<CanvasOverlay :handles-for="handlesFor" :connection="connection" :ghosts="ghosts" :guides="guides" :scale="scale" />
 		</div>
 		<div v-if="marqueeStyle" class="jc-marquee" :style="marqueeStyle" />
+		<CanvasMenu :menu="menu" @close="interaction.closeMenu" />
 	</div>
 </template>

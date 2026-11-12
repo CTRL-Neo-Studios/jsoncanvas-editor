@@ -12,6 +12,12 @@ export const RESIZE_HANDLES: readonly ResizeHandle[] = ['top', 'right', 'bottom'
 /** No node gets smaller than this by resizing (world units). */
 export const MIN_NODE_SIZE = 50
 
+/** Sizes of new nodes, as Obsidian makes them. */
+export const NODE_SIZE: Record<'text' | 'file', { width: number, height: number }> = {
+	text: { width: 250, height: 60 },
+	file: { width: 400, height: 400 },
+}
+
 /**
  * What a resize snaps by, and on which axes: the dragged edge as a line through the pointer, or the pointer itself
  * for a corner.

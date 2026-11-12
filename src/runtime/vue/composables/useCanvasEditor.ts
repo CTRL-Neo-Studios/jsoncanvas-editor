@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef, toRaw, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
 	CanvasHistory, containsBBox, edgeGeometry, fileLabel, growBBox, intersectsBBox, isSupportedEdge, isSupportedNode, nodeBox,
-	normalizeCanvas, unionBBox, viewportBBox, ZOOM_BREAKPOINT,
+	normalizeCanvas, pointBox, unionBBox, viewportBBox, ZOOM_BREAKPOINT,
 	type BBox, type CanvasIssue, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasNode, type JSONCanvasUnsupportedNode, type Viewport,
 } from '../../core'
 import { colorBinding, type ColorBinding } from '../utils/color'
@@ -24,6 +24,7 @@ export interface SceneNode {
 }
 
 export interface SceneEdge {
+	/** Unique among nodes and edges (an id shared with another gets the index appended). */
 	key: string
 	edge: JSONCanvasEdge
 	/** The boxes it was drawn between: reused while the edge and both boxes are unchanged. */
@@ -39,6 +40,7 @@ export interface Scene {
 	nodes: SceneNode[]
 	edges: SceneEdge[]
 	byKey: Map<string, SceneNode>
+	edgeByKey: Map<string, SceneEdge>
 }
 
 export interface CanvasEditorOptions {
@@ -59,7 +61,7 @@ export interface CanvasEditor {
 	canvas: ShallowRef<JSONCanvas>
 	issues: ShallowRef<CanvasIssue[]>
 	scene: ComputedRef<Scene>
-	/** Keys of the selected nodes. */
+	/** Keys of the selected nodes and edges. */
 	selected: ShallowRef<ReadonlySet<string>>
 	select: (keys: Iterable<string>) => void
 	/** Shows `canvas` without recording it (a drag in progress). */
@@ -183,7 +185,11 @@ export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: Canvas
 	}
 
 	function zoomToSelection() {
-		const box = unionBBox([...selected.value].flatMap(k => scene.value.byKey.get(k)?.box ?? []))
+		const { byKey, edgeByKey } = scene.value
+		const box = unionBBox([...selected.value].flatMap((k) => {
+			const e = edgeByKey.get(k)
+			return byKey.get(k)?.box ?? (e ? [unionBBox([pointBox(e.shape.start), pointBox(e.shape.end)])!] : [])
+		}))
 		if (box) viewport.zoomToBBox(box)
 	}
 
@@ -227,24 +233,23 @@ function buildScene(canvas: JSONCanvas, nodeCache: WeakMap<object, SceneNode>, e
 	}
 
 	const edges: SceneEdge[] = []
-	const edgeKeys = new Set<string>()
+	const edgeByKey = new Map<string, SceneEdge>()
 	for (const [index, edge] of (canvas.edges ?? []).entries()) {
 		if (!isSupportedEdge(edge) || !edge.fromSide || !edge.toSide) continue
 		const from = boxes.get(edge.fromNode), to = boxes.get(edge.toNode)
 		if (!from || !to) continue
-		const key = edgeKeys.has(edge.id) ? `${edge.id}#${index}` : edge.id
-		edgeKeys.add(key)
+		const key = byKey.has(edge.id) || edgeByKey.has(edge.id) ? `${edge.id}#${index}` : edge.id
 		let item = edgeCache.get(edge)
 		if (item?.key !== key || item.from !== from || item.to !== to) {
 			const shape = edgeGeometry(from, edge.fromSide, to, edge.toSide, edge.fromEnd, edge.toEnd)
-			const { start: a, end: b } = shape
-			const anchors = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) }
+			const anchors = unionBBox([pointBox(shape.start), pointBox(shape.end)])!
 			item = { key, edge, from, to, shape, color: colorBinding(edge.color), bounds: growBBox(anchors, EDGE_MARGIN) }
 			edgeCache.set(edge, item)
 		}
 		edges.push(item)
+		edgeByKey.set(key, item)
 	}
-	return { nodes, edges, byKey }
+	return { nodes, edges, byKey, edgeByKey }
 }
 
 /**

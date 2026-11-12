@@ -6,8 +6,9 @@ export default defineConfig({
 	plugins: [vue()],
 	resolve: {
 		alias: {
-			// Nuxt UI's icon needs its Vite plugin; tests don't look at icons.
+			// Nuxt UI's components need its Vite plugin and app config; tests don't look at icons, and menus are stand-ins.
 			'@nuxt/ui/components/Icon.vue': fileURLToPath(new URL('./test/stubs/IconStub.vue', import.meta.url)),
+			'@nuxt/ui/components/DropdownMenu.vue': fileURLToPath(new URL('./test/stubs/DropdownMenuStub.vue', import.meta.url)),
 		},
 	},
 	test: {

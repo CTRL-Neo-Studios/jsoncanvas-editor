@@ -51,7 +51,9 @@ const viewport = ref<Viewport>() // optional; without one the view fits the canv
 </script>
 ```
 
-Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`. The component ref exposes `canvas`, `issues`, `viewport`, `selected`, `select()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
+Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`. The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
+
+`host` (a `CanvasHost`, all optional) lets the canvas use the app around it: `pickFile()` resolves to a file path chosen by the user, `listLinks(path)` returns the places a note links to (`{ file, subpath? }`). Without them, the canvas leaves out what needs them.
 
 ### Usage (Vue + Vite)
 
@@ -71,8 +73,9 @@ The editor currently:
 - Pans (wheel, Space+drag, middle or right drag) and zooms (Ctrl/Cmd+wheel, pinch), with card content replaced by placeholders when zoomed far out
 - Selects (click, Shift+click, drag a rectangle, Cmd/Ctrl+A), moves (groups carry what's inside; Shift locks an axis; Option/Ctrl drops copies), resizes, and snaps to the grid and to other cards with guides (Ctrl/Alt turns snapping off)
 - Arrow keys nudge, Delete removes, Shift+1 / Shift+2 zoom to fit / to the selection, Cmd/Ctrl+Z undoes and Cmd/Ctrl+Shift+Z (or +Y) redoes
+- Connects nodes by dragging from a side's dot; an edge dropped on empty canvas offers to add a card, a file (`host.pickFile`) or a note the source links to (`host.listLinks`). Dragging an edge moves its nearer end (dropped on nothing, it's removed). Clicking an edge selects it, clicking it again edits its label; its right-click menu edits the label, sets the line direction, follows it to the far end, or removes it
 
-Connecting nodes, editing card content and the toolbars come next.
+Editing card content and the toolbars come next.
 
 Inspiration and reference implementations for rendering-only solutions:
 
