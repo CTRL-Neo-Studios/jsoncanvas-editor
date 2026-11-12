@@ -17,6 +17,8 @@
 	--jc-radius: calc(var(--ui-radius, 0.25rem) * 2);
 	--jc-shadow: 0 0.5px 1px 0.5px rgb(0 0 0 / 0.1);
 	--jc-zoom-multiplier: 1;
+	/* Selection, handles, snap guides. */
+	--jc-accent: var(--ui-primary, #6366f1);
 
 	position: relative;
 	width: 100%;
@@ -167,6 +169,29 @@
 	box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--jc-color) 70%, transparent), var(--jc-shadow);
 }
 
+.jc-canvas:not(.jc-readonly) .jc-node-container {
+	cursor: grab;
+}
+
+/* Selected: an accent ring (a colored card keeps its color), drawn above unselected cards. */
+.jc-node.jc-selected:not(.jc-node-group) {
+	z-index: 1;
+}
+
+.jc-node.jc-selected .jc-node-container {
+	border-color: var(--jc-accent);
+	box-shadow: var(--jc-shadow), 0 0 0 2px var(--jc-accent);
+}
+
+.jc-node.jc-selected.jc-themed .jc-node-container {
+	border-color: var(--jc-color);
+	box-shadow: inset 0 0 0 1px var(--jc-color), 0 0 0 2px var(--jc-color);
+}
+
+.jc-node.jc-selected .jc-node-label {
+	color: var(--ui-text-muted, #71717a);
+}
+
 .jc-node-content {
 	position: relative;
 	width: 100%;
@@ -261,6 +286,11 @@
 	pointer-events: none;
 }
 
+/* A selected group can be dragged by its whole area. */
+.jc-node-group.jc-selected {
+	pointer-events: auto;
+}
+
 .jc-node-group .jc-node-container {
 	background: transparent;
 }
@@ -291,6 +321,110 @@
 
 .jc-node-group.jc-themed.jc-light .jc-group-label {
 	color: #000;
+}
+
+/* Editing overlays */
+
+/* Resize handles: invisible strips along the edges and squares at the corners, only cursors show. */
+.jc-handles {
+	position: absolute;
+	left: 0;
+	top: 0;
+	z-index: 2;
+	pointer-events: none;
+}
+
+.jc-handle {
+	--jc-handle: calc(20px * var(--jc-zoom-multiplier));
+	position: absolute;
+	width: var(--jc-handle);
+	height: var(--jc-handle);
+	pointer-events: auto;
+}
+
+.jc-readonly .jc-handle {
+	display: none;
+}
+
+.jc-handle[data-resize="top"],
+.jc-handle[data-resize="bottom"] {
+	left: 0;
+	right: 0;
+	width: auto;
+	cursor: ns-resize;
+}
+
+.jc-handle[data-resize="left"],
+.jc-handle[data-resize="right"] {
+	top: 0;
+	bottom: 0;
+	height: auto;
+	cursor: ew-resize;
+}
+
+.jc-handle[data-resize^="top"] { top: calc(var(--jc-handle) / -2); }
+.jc-handle[data-resize^="bottom"] { bottom: calc(var(--jc-handle) / -2); }
+.jc-handle[data-resize$="left"] { left: calc(var(--jc-handle) / -2); }
+.jc-handle[data-resize$="right"] { right: calc(var(--jc-handle) / -2); }
+.jc-handle[data-resize="top-left"],
+.jc-handle[data-resize="bottom-right"] { cursor: nwse-resize; }
+.jc-handle[data-resize="top-right"],
+.jc-handle[data-resize="bottom-left"] { cursor: nesw-resize; }
+
+/* Around a multi-selection: drag it to move them all, its handles to scale them. */
+.jc-selection {
+	position: absolute;
+	left: 0;
+	top: 0;
+	border: calc(3px * var(--jc-zoom-multiplier)) solid color-mix(in oklch, var(--jc-accent) 30%, transparent);
+	border-radius: 3px;
+	background: color-mix(in oklch, var(--jc-accent) 3%, transparent);
+	pointer-events: auto;
+}
+
+.jc-canvas:not(.jc-readonly) .jc-selection {
+	cursor: grab;
+}
+
+.jc-marquee {
+	position: absolute;
+	border: 2px solid var(--jc-accent);
+	background: color-mix(in oklch, var(--jc-accent) 10%, transparent);
+	pointer-events: none;
+}
+
+/* Where copies land while a drag clones. */
+.jc-ghost {
+	position: absolute;
+	left: 0;
+	top: 0;
+	z-index: 2;
+	border: calc(4px * var(--jc-zoom-multiplier)) solid var(--jc-accent);
+	border-radius: var(--jc-radius);
+	background: color-mix(in oklch, var(--jc-accent) 20%, transparent);
+	pointer-events: none;
+}
+
+.jc-guides {
+	position: absolute;
+	left: 0;
+	top: 0;
+	z-index: 3;
+	width: 1px;
+	height: 1px;
+	overflow: visible;
+	opacity: 0.6;
+	pointer-events: none;
+}
+
+.jc-guides line {
+	stroke: var(--jc-accent);
+	stroke-width: 1px;
+	vector-effect: non-scaling-stroke;
+}
+
+.jc-guides circle {
+	fill: var(--jc-accent);
 }
 
 /* A node the editor can't show: kept in the file, drawn as a dashed box. */

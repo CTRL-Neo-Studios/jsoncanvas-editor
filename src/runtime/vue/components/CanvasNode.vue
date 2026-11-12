@@ -3,18 +3,17 @@ import { computed } from 'vue'
 import UIcon from '@nuxt/ui/components/Icon.vue'
 import { fileName } from '../../core'
 import type { CardLabels, SceneNode } from '../composables/useCanvasEditor'
+import { boxStyle } from '../utils/style'
 
 const props = defineProps<{
 	item: SceneNode
+	selected: boolean
 	/** Zoomed out past the breakpoint: show a placeholder instead of the content. */
 	contentHidden: boolean
 	cardLabels: CardLabels
 }>()
 
-const style = computed(() => {
-	const { box, color } = props.item
-	return [{ transform: `translate(${box.minX}px, ${box.minY}px)`, width: `${box.maxX - box.minX}px`, height: `${box.maxY - box.minY}px` }, color.style]
-})
+const style = computed(() => [boxStyle(props.item.box), props.item.color.style])
 
 /** What the card shows, per kind. */
 const content = computed(() => {
@@ -30,7 +29,13 @@ const content = computed(() => {
 </script>
 
 <template>
-	<div class="jc-node" :class="[`jc-node-${item.kind}`, item.color.class]" :style="style" :data-id="item.node.id">
+	<div
+		class="jc-node"
+		:class="[`jc-node-${item.kind}`, item.color.class, { 'jc-selected': selected }]"
+		:style="style"
+		:data-id="item.node.id"
+		:data-key="item.key"
+	>
 		<div v-if="item.label && cardLabels !== 'never'" class="jc-node-label" :class="{ 'jc-hover-label': cardLabels === 'hover' }">
 			{{ item.label }}
 		</div>

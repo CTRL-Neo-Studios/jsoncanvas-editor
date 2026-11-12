@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ARROW_POINTS } from '../../core'
+import { ARROW_POINTS, RESIZE_HANDLES, type BBox } from '../../core'
 import type { CardLabels, SceneEdge, SceneNode } from '../composables/useCanvasEditor'
+import { boxStyle } from '../utils/style'
 import CanvasNode from './CanvasNode.vue'
 
 /** Everything in the world layer. Re-renders only when what's visible changes, not on every frame of a pan. */
 const props = defineProps<{
 	nodes: SceneNode[]
 	edges: SceneEdge[]
+	selected: ReadonlySet<string>
+	/** Around a multi-selection; below the nodes, so they stay clickable. */
+	selectionBox?: BBox
 	contentHidden: boolean
 	cardLabels: CardLabels
 }>()
@@ -36,7 +40,17 @@ const labelled = computed(() => props.edges.filter(e => e.edge.label))
 			</g>
 		</template>
 	</svg>
-	<CanvasNode v-for="n in nodes" :key="n.key" :item="n" :content-hidden="contentHidden" :card-labels="cardLabels" />
+	<div v-if="selectionBox" class="jc-selection" :style="boxStyle(selectionBox)">
+		<div v-for="h in RESIZE_HANDLES" :key="h" class="jc-handle" :data-resize="h" />
+	</div>
+	<CanvasNode
+		v-for="n in nodes"
+		:key="n.key"
+		:item="n"
+		:selected="selected.has(n.key)"
+		:content-hidden="contentHidden"
+		:card-labels="cardLabels"
+	/>
 	<div
 		v-for="e in labelled"
 		:key="e.key"

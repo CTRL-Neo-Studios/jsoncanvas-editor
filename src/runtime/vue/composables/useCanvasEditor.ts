@@ -1,16 +1,16 @@
-import { computed, shallowRef, watch, type Ref } from 'vue'
+import { computed, ref, shallowRef, toRaw, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
-	containsBBox, edgeGeometry, fileLabel, growBBox, intersectsBBox, isSupportedEdge, isSupportedNode, nodeBox, normalizeCanvas,
-	unionBBox, viewportBBox, ZOOM_BREAKPOINT,
+	CanvasHistory, containsBBox, edgeGeometry, fileLabel, growBBox, intersectsBBox, isSupportedEdge, isSupportedNode, nodeBox,
+	normalizeCanvas, unionBBox, viewportBBox, ZOOM_BREAKPOINT,
 	type BBox, type CanvasIssue, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasNode, type JSONCanvasUnsupportedNode, type Viewport,
 } from '../../core'
 import { colorBinding, type ColorBinding } from '../utils/color'
-import { useViewport, type WheelBehavior } from './useViewport'
+import { useViewport, type ViewportController, type WheelBehavior } from './useViewport'
 
 /** Whether file and link cards show their name above them. */
 export type CardLabels = 'always' | 'hover' | 'never'
 
-/** A node as drawn: the data plus what rendering needs, computed once per document. */
+/** A node as drawn: the data plus what rendering needs. Reused while its node object is unchanged. */
 export interface SceneNode {
 	/** Unique among nodes (an id shared by several gets the index appended). */
 	key: string
@@ -26,14 +26,25 @@ export interface SceneNode {
 export interface SceneEdge {
 	key: string
 	edge: JSONCanvasEdge
+	/** The boxes it was drawn between: reused while the edge and both boxes are unchanged. */
+	from: BBox
+	to: BBox
 	shape: EdgeGeometry
 	color: ColorBinding
 	/** The anchors' box grown by how far a curve can bulge past them. */
 	bounds: BBox
 }
 
+export interface Scene {
+	nodes: SceneNode[]
+	edges: SceneEdge[]
+	byKey: Map<string, SceneNode>
+}
+
 export interface CanvasEditorOptions {
 	canvas: () => JSONCanvas
+	/** The document changed by an edit. */
+	onChange: (canvas: JSONCanvas) => void
 	wheelBehavior: () => WheelBehavior
 	/** Lowers the zoom at which card content gives way to placeholders. */
 	zoomBreakpointOffset: () => number
@@ -42,20 +53,106 @@ export interface CanvasEditorOptions {
 	onViewportSettled: (v: Viewport) => void
 }
 
+/** The document being edited, what's drawn of it, the selection, undo, and the view. */
+export interface CanvasEditor {
+	/** The document as shown: the last committed one, or a drag's preview of the next. */
+	canvas: ShallowRef<JSONCanvas>
+	issues: ShallowRef<CanvasIssue[]>
+	scene: ComputedRef<Scene>
+	/** Keys of the selected nodes. */
+	selected: ShallowRef<ReadonlySet<string>>
+	select: (keys: Iterable<string>) => void
+	/** Shows `canvas` without recording it (a drag in progress). */
+	preview: (canvas: JSONCanvas) => void
+	/** Makes `canvas` (default: the preview) the document: reported to the parent and recorded for undo. */
+	commit: (canvas?: JSONCanvas) => void
+	undo: () => void
+	redo: () => void
+	canUndo: Ref<boolean>
+	canRedo: Ref<boolean>
+	viewport: ViewportController
+	visibleNodes: ComputedRef<SceneNode[]>
+	visibleEdges: ComputedRef<SceneEdge[]>
+	/** At or below the zoom where labels hide. */
+	zoomedOut: ComputedRef<boolean>
+	/** At or below the zoom where card content gives way to placeholders. */
+	contentHidden: ComputedRef<boolean>
+	zoomToFit: (jump?: boolean) => void
+	zoomToSelection: () => void
+}
+
 /** How far (world units) a curve can bulge past its anchors: stub + control distance × 0.75 + slack. */
 const EDGE_MARGIN = 7 + 0.75 * 150 + 48
+/** Edits closer together than this are one undo step. */
+const HISTORY_DELAY = 250
 
-/** The canvas shown in `el`: its normalized document, what to draw, and the view. */
-export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: CanvasEditorOptions) {
+export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: CanvasEditorOptions): CanvasEditor {
 	const canvas = shallowRef<JSONCanvas>({ nodes: [], edges: [] })
 	const issues = shallowRef<CanvasIssue[]>([])
+	const selected = shallowRef<ReadonlySet<string>>(new Set())
+	const history = new CanvasHistory<JSONCanvas>()
+	const canUndo = ref(false), canRedo = ref(false)
+	/** The last committed document; what undo records. Documents are never changed in place. */
+	let committed = canvas.value
+	let pendingPush: ReturnType<typeof setTimeout> | undefined
+
 	watch(o.canvas, (value) => {
-		const parsed = normalizeCanvas(value)
-		canvas.value = parsed.canvas
+		const raw = toRaw(value) // a parent's `ref()` hands over a proxy, which `structuredClone` can't copy
+		if (raw === committed) return // our own edit, handed back
+		const parsed = normalizeCanvas(raw)
+		committed = canvas.value = parsed.canvas
 		issues.value = parsed.issues
+		selected.value = new Set()
+		clearTimeout(pendingPush)
+		pendingPush = undefined
+		history.clear()
+		history.push(committed)
+		syncHistory()
 	}, { immediate: true })
 
-	const scene = computed(() => buildScene(canvas.value))
+	function syncHistory() {
+		canUndo.value = history.canUndo || pendingPush !== undefined
+		canRedo.value = history.canRedo && pendingPush === undefined
+	}
+
+	function flushHistory() {
+		if (pendingPush === undefined) return
+		clearTimeout(pendingPush)
+		pendingPush = undefined
+		history.push(committed)
+		syncHistory()
+	}
+
+	function apply(doc: JSONCanvas) {
+		committed = canvas.value = doc
+		issues.value = normalizeCanvas(doc).issues
+		o.onChange(doc)
+	}
+
+	function commit(doc = canvas.value) {
+		if (doc === committed) return
+		apply(doc)
+		clearTimeout(pendingPush)
+		pendingPush = setTimeout(flushHistory, HISTORY_DELAY)
+		syncHistory()
+	}
+
+	function undo() {
+		flushHistory()
+		const doc = history.undo()
+		if (doc) apply(doc)
+		syncHistory()
+	}
+
+	function redo() {
+		const doc = history.redo()
+		if (doc) apply(doc)
+		syncHistory()
+	}
+
+	const nodeCache = new WeakMap<object, SceneNode>()
+	const edgeCache = new WeakMap<object, SceneEdge>()
+	const scene = computed(() => buildScene(canvas.value, nodeCache, edgeCache))
 
 	const viewport = useViewport(el, {
 		wheelBehavior: o.wheelBehavior,
@@ -79,36 +176,54 @@ export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: Canvas
 	})
 	const visibleNodes = stableFilter(() => scene.value.nodes, n => intersectsBBox(n.box, visibleBox.value))
 	const visibleEdges = stableFilter(() => scene.value.edges, e => intersectsBBox(e.bounds, visibleBox.value))
-	const zoomedOut = computed(() => view.zoom <= ZOOM_BREAKPOINT)
-	const contentHidden = computed(() => view.zoom <= ZOOM_BREAKPOINT - o.zoomBreakpointOffset())
 
-	/** Shows every node; `jump` skips the animation. */
 	function zoomToFit(jump = false) {
 		const box = unionBBox(scene.value.nodes.map(n => n.box))
 		if (box) viewport.zoomToBBox(box, jump)
 	}
 
-	return { canvas, issues, scene, viewport, visibleNodes, visibleEdges, zoomedOut, contentHidden, zoomToFit }
+	function zoomToSelection() {
+		const box = unionBBox([...selected.value].flatMap(k => scene.value.byKey.get(k)?.box ?? []))
+		if (box) viewport.zoomToBBox(box)
+	}
+
+	return {
+		canvas, issues, scene, selected, canUndo, canRedo, viewport, visibleNodes, visibleEdges,
+		zoomedOut: computed(() => view.zoom <= ZOOM_BREAKPOINT),
+		contentHidden: computed(() => view.zoom <= ZOOM_BREAKPOINT - o.zoomBreakpointOffset()),
+		select: (keys) => {
+			selected.value = new Set(keys)
+		},
+		preview: (doc) => {
+			canvas.value = doc
+		},
+		commit, undo, redo, zoomToFit, zoomToSelection,
+	}
 }
 
-function buildScene(canvas: JSONCanvas) {
+function buildScene(canvas: JSONCanvas, nodeCache: WeakMap<object, SceneNode>, edgeCache: WeakMap<object, SceneEdge>): Scene {
 	const nodes: SceneNode[] = []
+	const byKey = new Map<string, SceneNode>()
 	const boxes = new Map<string, BBox>()
-	const keys = new Set<string>()
 	for (const [index, node] of (canvas.nodes ?? []).entries()) {
-		const box = nodeBox(node)
-		if (!box) continue
 		const id = typeof node.id === 'string' ? node.id : ''
-		const key = id && !keys.has(id) ? id : `${id}#${index}`
-		keys.add(key)
-		if (id && !boxes.has(id)) boxes.set(id, box)
-		const supported = isSupportedNode(node)
-		nodes.push({
-			key, node, box,
-			kind: supported ? node.type : 'unsupported',
-			color: colorBinding(node.color),
-			label: supported && node.type === 'file' ? fileLabel(node.file, node.subpath) : supported && node.type === 'link' ? node.url : undefined,
-		})
+		const key = id && !byKey.has(id) ? id : `${id}#${index}`
+		let item = nodeCache.get(node)
+		if (item?.key !== key) {
+			const box = nodeBox(node)
+			if (!box) continue
+			const supported = isSupportedNode(node)
+			item = {
+				key, node, box,
+				kind: supported ? node.type : 'unsupported',
+				color: colorBinding(node.color),
+				label: supported && node.type === 'file' ? fileLabel(node.file, node.subpath) : supported && node.type === 'link' ? node.url : undefined,
+			}
+			nodeCache.set(node, item)
+		}
+		nodes.push(item)
+		byKey.set(key, item)
+		if (id && !boxes.has(id)) boxes.set(id, item.box)
 	}
 
 	const edges: SceneEdge[] = []
@@ -117,21 +232,26 @@ function buildScene(canvas: JSONCanvas) {
 		if (!isSupportedEdge(edge) || !edge.fromSide || !edge.toSide) continue
 		const from = boxes.get(edge.fromNode), to = boxes.get(edge.toNode)
 		if (!from || !to) continue
-		const shape = edgeGeometry(from, edge.fromSide, to, edge.toSide, edge.fromEnd, edge.toEnd)
-		const { start: a, end: b } = shape
-		const anchors = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) }
 		const key = edgeKeys.has(edge.id) ? `${edge.id}#${index}` : edge.id
 		edgeKeys.add(key)
-		edges.push({ key, edge, shape, color: colorBinding(edge.color), bounds: growBBox(anchors, EDGE_MARGIN) })
+		let item = edgeCache.get(edge)
+		if (item?.key !== key || item.from !== from || item.to !== to) {
+			const shape = edgeGeometry(from, edge.fromSide, to, edge.toSide, edge.fromEnd, edge.toEnd)
+			const { start: a, end: b } = shape
+			const anchors = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) }
+			item = { key, edge, from, to, shape, color: colorBinding(edge.color), bounds: growBBox(anchors, EDGE_MARGIN) }
+			edgeCache.set(edge, item)
+		}
+		edges.push(item)
 	}
-	return { nodes, edges }
+	return { nodes, edges, byKey }
 }
 
 /**
  * `source()` filtered by `keep`, as a computed that returns the previous array while the same items pass, so what
  * renders it isn't re-rendered for every frame of a pan.
  */
-function stableFilter<T>(source: () => T[], keep: (item: T) => boolean) {
+function stableFilter<T>(source: () => T[], keep: (item: T) => boolean): ComputedRef<T[]> {
 	let previous: T[] = []
 	return computed(() => {
 		const next = source().filter(keep)

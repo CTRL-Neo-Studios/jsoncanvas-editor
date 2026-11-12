@@ -1,5 +1,6 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, type ComputedRef, type Ref } from 'vue'
 import { clampZoom, fitViewport, viewportToWorld, zoomViewport, type BBox, type Point, type Viewport } from '../../core'
+import { IS_MAC } from '../utils/platform'
 
 export type WheelBehavior = 'pan' | 'zoom'
 
@@ -12,6 +13,37 @@ export interface ViewportOptions {
 	onSettled: (v: Viewport) => void
 }
 
+/** A view of the canvas and the gestures that move it. */
+export interface ViewportController {
+	/** Where the view is now (changes every frame while it moves). */
+	view: Viewport
+	/** The view's size in screen px. */
+	size: { width: number, height: number }
+	scale: ComputedRef<number>
+	/** `view.zoom`, updated only once the view is at rest. */
+	settledZoom: Ref<number>
+	spaceHeld: Ref<boolean>
+	/** A pan drag is in progress. */
+	panning: Ref<boolean>
+	/** The view moves, or moved in the last moments. */
+	moving: Ref<boolean>
+	/** Jumps to `v`. */
+	setViewport: (v: Viewport) => void
+	/** Zooms by `dz` (log2 units), keeping the world point under `at` (screen px from the centre) in place. */
+	zoomBy: (dz: number, at?: Point) => void
+	/** Moves the view by world units, at once. */
+	panBy: (dx: number, dy: number) => void
+	/** Animates to show `box`; `jump` skips the animation. */
+	zoomToBBox: (box: BBox, jump?: boolean) => void
+	screenToWorld: (e: { clientX: number, clientY: number }) => Point
+	onWheel: (e: WheelEvent) => void
+	/** Starts a pan for middle, right and Space+left drags; returns whether it did. */
+	onPointerDown: (e: PointerEvent) => boolean
+	onContextMenu: (e: MouseEvent) => void
+	onKeyDown: (e: KeyboardEvent) => void
+	onKeyUp: (e: KeyboardEvent) => void
+}
+
 const EASE = 0.984
 const EPSILON = 0.01
 const WHEEL_PAN = 0.93
@@ -22,13 +54,12 @@ const WHEEL_ZOOM = 300
  */
 const MOVE_PAUSE = 200
 const DRAG_THRESHOLD = 5
-const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
 
 /**
  * The view of the canvas inside `el`: where it is, its animation toward a target, and the wheel, drag and Space
  * gestures that move it. `view` is the current state; `settledZoom` only changes once the view is at rest.
  */
-export function useViewport(el: Readonly<Ref<HTMLElement | null>>, o: ViewportOptions) {
+export function useViewport(el: Readonly<Ref<HTMLElement | null>>, o: ViewportOptions): ViewportController {
 	const view = reactive<Viewport>({ x: 0, y: 0, zoom: 0 })
 	const size = reactive({ width: 0, height: 0 })
 	const settledZoom = ref(0)

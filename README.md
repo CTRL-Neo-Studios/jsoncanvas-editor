@@ -51,7 +51,7 @@ const viewport = ref<Viewport>() // optional; without one the view fits the canv
 </script>
 ```
 
-Props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`. The component ref exposes `canvas`, `issues`, `viewport`, `zoomToFit()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
+Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`. The component ref exposes `canvas`, `issues`, `viewport`, `selected`, `select()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
 
 ### Usage (Vue + Vite)
 
@@ -69,8 +69,10 @@ The editor currently:
 - Reads and writes JSON Canvas files as Obsidian does, keeping data it doesn't understand (listed in `issues`; unknown nodes show as placeholders)
 - Draws text, file, link and group nodes and edges with arrows, labels and colors, at Obsidian's geometry
 - Pans (wheel, Space+drag, middle or right drag) and zooms (Ctrl/Cmd+wheel, pinch), with card content replaced by placeholders when zoomed far out
+- Selects (click, Shift+click, drag a rectangle, Cmd/Ctrl+A), moves (groups carry what's inside; Shift locks an axis; Option/Ctrl drops copies), resizes, and snaps to the grid and to other cards with guides (Ctrl/Alt turns snapping off)
+- Arrow keys nudge, Delete removes, Shift+1 / Shift+2 zoom to fit / to the selection, Cmd/Ctrl+Z undoes and Cmd/Ctrl+Shift+Z (or +Y) redoes
 
-Editing (selection, moving, resizing, connecting) comes next.
+Connecting nodes, editing card content and the toolbars come next.
 
 Inspiration and reference implementations for rendering-only solutions:
 
