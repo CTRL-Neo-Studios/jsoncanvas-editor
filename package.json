@@ -1,6 +1,6 @@
 {
   "name": "@type32/jsoncanvas-editor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An Obsidian-style JSON Canvas editor for Nuxt and Vue, built on Nuxt UI.",
   "repository": "https://github.com/Type-32/jsoncanvas-editor-nuxt",
   "keywords": [
