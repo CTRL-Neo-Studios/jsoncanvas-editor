@@ -51,9 +51,36 @@ const viewport = ref<Viewport>() // optional; without one the view fits the canv
 </script>
 ```
 
-Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`. The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
+Edits come back through `v-model` as new objects (one per drag or key press; the object you passed is never changed). Props: `readonly`, `snapToGrid`, `snapToObjects`, `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`, `host`, `fileRenderers`, `nodeRenderers`. The component ref exposes `canvas`, `issues`, `viewport`, `selected` (node and edge keys), `select()`, `addNode()`, `undo()`, `redo()`, `canUndo`, `canRedo`, `zoomToFit()`, `zoomToSelection()`, `zoomToBBox()`, `zoomBy()`, `setViewport()`, `screenToWorld()` and `refreshFiles()`.
 
-`host` (a `CanvasHost`, all optional) lets the canvas use the app around it: `pickFile()` resolves to a file path chosen by the user, `listLinks(path)` returns the places a note links to (`{ file, subpath? }`). Without them, the canvas leaves out what needs them.
+`host` (a `CanvasHost`, every member optional) connects the canvas to the app around it; without a member, the canvas leaves out what needs it:
+
+| Member | Used for |
+|---|---|
+| `resolveFile(path)` → `{ exists, name?, ext?, url? }` | file cards: missing files, and where images, video, audio and PDFs load from |
+| `readText(path)` | notes and canvases shown in cards |
+| `pickFile({ kinds? })` | Swap file, and Add file in a dropped edge's menu |
+| `listLinks(path)` → `{ file, subpath? }[]` | a note's links in a dropped edge's menu |
+| `openFile(path, subpath, newTab)` | double-click (or Mod+click) on a card's name, a click on a selected generic or canvas card |
+| `openLink(target)` | `[[wiki-links]]` in cards |
+| `importFiles(files)` | pasting and dropping files (coming with the clipboard) |
+
+Loaded files are cached; call `refreshFiles(paths?)` when they change outside the canvas.
+
+#### Custom cards
+
+Any card can be replaced, and new node types added, with a component per `type` in `nodeRenderers`, or a `#node-<type>` slot (which wins):
+
+```vue
+<JsonCanvas v-model="canvas" :node-renderers="{ shape: ShapeCard }">
+  <template #node-sticky="{ node, editing, update, done }">
+    <textarea v-if="editing" :value="node.note" @change="update({ note: $event.target.value })" @keydown.escape="done()" />
+    <p v-else>{{ node.note }}</p>
+  </template>
+</JsonCanvas>
+```
+
+A card gets `node`, `selected`, `focused` (the only thing selected), `editing` (double-clicked into), `contentHidden` (zoomed far out), `readonly`, `host`, `update(patch)` (saves, one undo step; `undefined` removes a key) and `done()` (ends editing). The canvas moves, resizes, connects and snaps any card by its `x`, `y`, `width` and `height`; every other field is the card's. Nodes of a type with a card aren't reported in `issues`, and `addNode({ type, x, y, width, height, ... })` adds one. File cards can also be replaced per extension with `fileRenderers` (`{ base: BaseCard }`, props `node`, `file`, `host`), and a text card's Markdown or editor alone with the `#text-display` / `#text-editor` slots.
 
 ### Usage (Vue + Vite)
 
@@ -74,8 +101,11 @@ The editor currently:
 - Selects (click, Shift+click, drag a rectangle, Cmd/Ctrl+A), moves (groups carry what's inside; Shift locks an axis; Option/Ctrl drops copies), resizes, and snaps to the grid and to other cards with guides (Ctrl/Alt turns snapping off)
 - Arrow keys nudge, Delete removes, Shift+1 / Shift+2 zoom to fit / to the selection, Cmd/Ctrl+Z undoes and Cmd/Ctrl+Shift+Z (or +Y) redoes
 - Connects nodes by dragging from a side's dot; an edge dropped on empty canvas offers to add a card, a file (`host.pickFile`) or a note the source links to (`host.listLinks`). Dragging an edge moves its nearer end (dropped on nothing, it's removed). Clicking an edge selects it, clicking it again edits its label; its right-click menu edits the label, sets the line direction, follows it to the far end, or removes it
+- Shows text cards as Markdown (Obsidian's flavour without raw HTML; wiki-links go to `host.openLink`) and edits them on double-click (Escape or a click elsewhere saves). Double-clicking a card's bottom or right edge fits it to its text
+- Shows file cards by kind: notes (narrowed to a `#heading` or `#^block`), images and video (cards keep the media's shape), audio, PDFs (`#page=N`), other canvases as a minimap, and missing files with Swap file / Remove. Link cards show the page in a sandboxed frame (YouTube and X posts as their embeds). Groups show a background image (cover, repeat, or keep its ratio) and rename on double-click
+- Right-click menus for cards: Edit, Edit label, Swap file, Open in new tab, and for links Change URL, Open in browser, Copy URL, Reload page
 
-Editing card content and the toolbars come next.
+The toolbars, the remaining menus and settings come next.
 
 Inspiration and reference implementations for rendering-only solutions:
 

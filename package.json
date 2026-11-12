@@ -50,8 +50,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@comark/vue": "^0.9.1",
     "@nuxt/kit": "^4.6.4",
-    "@vueuse/core": "^15.0.0"
+    "@vueuse/core": "^15.0.0",
+    "comark": "^0.9.1"
   },
   "peerDependencies": {
     "@nuxt/ui": "^4.12.0",

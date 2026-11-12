@@ -1,4 +1,5 @@
 export { default as JsonCanvas } from './components/JsonCanvas.vue'
+export type { CanvasSlots } from './composables/useCanvasContent'
 export type { CardLabels } from './composables/useCanvasEditor'
 export type { WheelBehavior } from './composables/useViewport'
-export type { CanvasHost, CanvasLink } from './host'
+export type { CanvasHost, CanvasLink, FileRendererProps, FileRenderers, NodeRendererProps, NodeRenderers, ResolvedFile } from './host'

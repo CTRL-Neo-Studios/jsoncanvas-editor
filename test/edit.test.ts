@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cloneNodes, raiseNodes, removeFromCanvas, resizeBox, resizeSnapSource, scaleBoxes, type BBox, type JSONCanvas } from '../src/runtime/core'
+import { cloneNodes, raiseNodes, removeFromCanvas, resizeBox, resizeSnapSource, scaleBoxes, setBackground, type BBox, type JSONCanvas } from '../src/runtime/core'
 
 const box = (minX: number, minY: number, maxX: number, maxY: number): BBox => ({ minX, minY, maxX, maxY })
 
@@ -65,5 +65,31 @@ describe('document edits', () => {
 		const copy = out.edges!.at(-1)!
 		expect(out.edges).toHaveLength(3)
 		expect(copy).toMatchObject({ fromNode: clones[0]!.id, toNode: clones[1]!.id, color: '2' })
+	})
+})
+
+describe('setBackground', () => {
+	const g = { id: 'g', type: 'group' as const, x: 0, y: 0, width: 100, height: 100, label: 'L' }
+
+	it('appends a new background and a non-cover style', () => {
+		const out = setBackground(g, 'a.png', 'repeat')
+		expect(Object.keys(out)).toEqual(['id', 'type', 'x', 'y', 'width', 'height', 'label', 'background', 'backgroundStyle'])
+		expect(out).toMatchObject({ background: 'a.png', backgroundStyle: 'repeat' })
+		expect(g).not.toHaveProperty('background')
+	})
+
+	it('replaces a background in place and drops a stale style', () => {
+		const styled = { ...g, background: 'old.png', backgroundStyle: 'ratio' as const, extra: 1 }
+		const out = setBackground(styled, 'new.png', 'cover')
+		expect(Object.keys(out)).toEqual(['id', 'type', 'x', 'y', 'width', 'height', 'label', 'background', 'extra'])
+		expect(out.background).toBe('new.png')
+		expect(setBackground(styled, 'new.png')).not.toHaveProperty('backgroundStyle')
+	})
+
+	it('removes the background with its style', () => {
+		const out = setBackground({ ...g, background: 'old.png', backgroundStyle: 'repeat' as const }, undefined, 'repeat')
+		expect(out).not.toHaveProperty('background')
+		expect(out).not.toHaveProperty('backgroundStyle')
+		expect(setBackground({ ...g, background: 'old.png' }, '')).not.toHaveProperty('background')
 	})
 })

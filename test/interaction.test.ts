@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { defineComponent, h, nextTick, type VNode } from 'vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { JSONCanvas, JSONCanvasEdge, JSONCanvasNode } from '../src/runtime/core'
 import JsonCanvas from '../src/runtime/vue/components/JsonCanvas.vue'
@@ -35,7 +35,7 @@ function frame() {
 let wrapper: VueWrapper<InstanceType<typeof JsonCanvas>>
 afterEach(() => wrapper?.unmount())
 
-async function setup(canvas: JSONCanvas, props: Record<string, unknown> = {}) {
+async function setup(canvas: JSONCanvas, props: Record<string, unknown> = {}, slots: Record<string, (props: { node: Record<string, unknown> }) => VNode[]> = {}) {
 	wrapper = mount(JsonCanvas, {
 		attachTo: document.body,
 		props: {
@@ -44,6 +44,7 @@ async function setup(canvas: JSONCanvas, props: Record<string, unknown> = {}) {
 			'onUpdate:modelValue': (v: JSONCanvas) => wrapper.setProps({ modelValue: v }),
 			...props,
 		},
+		slots,
 	})
 	await frame()
 	await frame()
@@ -389,5 +390,100 @@ describe('edges', () => {
 		expect(wrapper.find('[contenteditable]').exists()).toBe(false)
 		expect(selected()).toEqual(['e'])
 		expect(emits()).toBe(0)
+	})
+})
+
+describe('custom cards', () => {
+	const shape = { id: 's', type: 'shape', shape: 'star', x: 0, y: 0, width: 100, height: 100 }
+	/** Shows its `shape`; while editing, a button that changes it. */
+	const ShapeCard = defineComponent({
+		props: ['node', 'editing', 'update', 'done'],
+		setup: p => () => h('div', { class: 'shape' }, [
+			String(p.node.shape),
+			p.editing && h('button', { class: 'to-circle', onClick: () => (p.update({ shape: 'circle' }), p.done()) }),
+		]),
+	})
+
+	it('draws a custom type with its component, saves its updates and stops reporting it', async () => {
+		await setup({ nodes: [shape] }, { nodeRenderers: { shape: ShapeCard } })
+		expect(wrapper.find('[data-key="s"] .shape').text()).toBe('star')
+		expect(wrapper.vm.issues).toEqual([])
+		nodeEl('s').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+		await nextTick()
+		await wrapper.find('.to-circle').trigger('click')
+		expect(doc().nodes![0]).toMatchObject({ type: 'shape', shape: 'circle' })
+		expect(wrapper.find('.to-circle').exists()).toBe(false)
+		await key('z', MOD)
+		expect(doc().nodes![0]).toMatchObject({ shape: 'star' })
+	})
+
+	it('lets a #node-<type> slot replace a built-in card, ahead of nodeRenderers', async () => {
+		await setup(
+			{ nodes: [card('a', 0, 0), shape] },
+			{ nodeRenderers: { shape: ShapeCard } },
+			{ 'node-text': p => [h('p', { class: 'mine' }, String(p.node.text))], 'node-shape': () => [h('i', { class: 'slot-shape' })] },
+		)
+		expect(wrapper.find('[data-key="a"] .mine').text()).toBe('a')
+		expect(wrapper.find('[data-key="s"] .slot-shape').exists()).toBe(true)
+		expect(wrapper.find('.shape').exists()).toBe(false)
+	})
+
+	it('adds a node of any type through the component', async () => {
+		await setup({ nodes: [] }, { nodeRenderers: { shape: ShapeCard } })
+		const id = wrapper.vm.addNode({ type: 'shape', shape: 'square', x: 10, y: 10, width: 80, height: 80 })
+		await nextTick()
+		expect(doc().nodes).toEqual([{ id, type: 'shape', shape: 'square', x: 10, y: 10, width: 80, height: 80 }])
+		expect(selected()).toEqual([id])
+		expect(wrapper.find(`[data-key="${id}"] .shape`).text()).toBe('square')
+	})
+})
+
+describe('card content', () => {
+	const file = (id: string, path: string, extra: Record<string, unknown> = {}) => ({ id, type: 'file', file: path, x: 0, y: 0, width: 400, height: 400, ...extra })
+
+	it('edits a text card on double-click and saves it on Escape, as one undo step', async () => {
+		await setup({ nodes: [card('a', 0, 0)] })
+		nodeEl('a').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+		await nextTick()
+		const editor = wrapper.find('textarea')
+		await editor.setValue('**new**')
+		await editor.trigger('keydown', { key: 'Escape' })
+		expect(doc().nodes![0]).toMatchObject({ text: '**new**' })
+		expect(wrapper.find('textarea').exists()).toBe(false)
+		await key('z', MOD)
+		expect(doc().nodes![0]).toMatchObject({ text: 'a' })
+	})
+
+	it('shows files as the host resolves them: missing (removable), a note narrowed to a heading, others generic', async () => {
+		const host = {
+			resolveFile: (path: string) => ({ exists: path !== 'gone.md', url: `/${path}` }),
+			readText: () => '# A\none\n# B\ntwo [[Other note]]',
+			openLink: vi.fn(),
+		}
+		await setup({ nodes: [file('gone', 'gone.md'), file('note', 'n.md', { subpath: '#B', x: 500 }), file('zip', 'x.zip', { x: 1000 })] }, { host })
+		await flushPromises()
+		expect(wrapper.find('[data-key="gone"] .jc-missing').text()).toContain('“gone.md” could not be found.')
+		// The Markdown parser loads and runs asynchronously.
+		await vi.waitFor(() => expect(wrapper.find('[data-key="note"] .jc-markdown').text()).toContain('two'))
+		expect(wrapper.find('[data-key="note"] .jc-markdown').text()).not.toContain('one')
+		expect(wrapper.find('[data-key="zip"] .jc-card').text()).toBe('x.zip')
+		await wrapper.find('[data-key="note"] a[data-wikilink]').trigger('click')
+		expect(host.openLink).toHaveBeenCalledWith('Other note')
+		await wrapper.find('[data-key="gone"] .jc-danger').trigger('click')
+		expect(doc().nodes!.map(n => n.id)).toEqual(['note', 'zip'])
+	})
+
+	it('shrinks an image card to the image\'s shape on load, without an undo step, and keeps that shape when resized', async () => {
+		await setup({ nodes: [file('img', 'a.png')] }, { host: { resolveFile: () => ({ exists: true, url: '/a.png' }) } })
+		await flushPromises()
+		const img = wrapper.find('img').element
+		Object.defineProperties(img, { naturalWidth: { value: 300 }, naturalHeight: { value: 400 } })
+		img.dispatchEvent(new Event('load'))
+		expect(box('img')).toEqual([0, 0, 300, 400])
+		expect(wrapper.vm.canUndo).toBe(false)
+		pointer('pointermove', root(), 150, 200)
+		await nextTick()
+		await drag(wrapper.find('.jc-handle[data-resize="right"]').element, [[300, 200], [200, 200], [150, 200]], NO_SNAP)
+		expect(box('img')).toEqual([0, 0, 150, 200])
 	})
 })

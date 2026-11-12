@@ -149,8 +149,20 @@ export function useViewport(el: Readonly<Ref<HTMLElement | null>>, o: ViewportOp
 
 	const screenToWorld = (e: { clientX: number, clientY: number }): Point => viewportToWorld(view, fromCenter(e))
 
+	/** A plain wheel over a focused card's content that can scroll that way scrolls it, not the canvas. */
+	function scrollsItself(e: WheelEvent): boolean {
+		if (e.ctrlKey || e.metaKey) return false
+		for (let n = e.target as Element | null; n && n !== el.value; n = n.parentElement) {
+			if (!n.closest('.jc-focused, .jc-editing')) return false
+			const { scrollTop, scrollHeight, clientHeight, scrollLeft, scrollWidth, clientWidth } = n
+			if ((e.deltaY < 0 && scrollTop > 0) || (e.deltaY > 0 && scrollTop + clientHeight < scrollHeight - 1)) return true
+			if ((e.deltaX < 0 && scrollLeft > 0) || (e.deltaX > 0 && scrollLeft + clientWidth < scrollWidth - 1)) return true
+		}
+		return false
+	}
+
 	function onWheel(e: WheelEvent) {
-		if (e.defaultPrevented) return
+		if (e.defaultPrevented || scrollsItself(e)) return
 		e.preventDefault()
 		let zoom = e.ctrlKey || e.metaKey || spaceHeld.value
 		if (o.wheelBehavior() === 'zoom') zoom = !zoom

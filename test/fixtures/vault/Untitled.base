@@ -1,0 +1,12 @@
+filters:
+  and:
+    - file.ext == "md"
+views:
+  - type: table
+    name: All notes
+    order:
+      - file.name
+      - file.mtime
+  - type: cards
+    name: Gallery
+    image: cover

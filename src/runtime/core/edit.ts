@@ -1,6 +1,6 @@
 import type { BBox, Point } from './geometry'
 import { nodeBox, orderNodes } from './parse'
-import { newId, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasNode, type JSONCanvasUnsupportedEdge, type JSONCanvasUnsupportedNode } from './types'
+import { newId, type JSONCanvas, type JSONCanvasEdge, type JSONCanvasGroupNode, type JSONCanvasNode, type JSONCanvasUnsupportedEdge, type JSONCanvasUnsupportedNode } from './types'
 
 type AnyNode = JSONCanvasNode | JSONCanvasUnsupportedNode
 type AnyEdge = JSONCanvasEdge | JSONCanvasUnsupportedEdge
@@ -108,4 +108,17 @@ export function cloneNodes(canvas: JSONCanvas, nodes: readonly AnyNode[], offset
 		canvas: { ...canvas, nodes: orderNodes([...(canvas.nodes ?? []), ...clones]), edges: [...(canvas.edges ?? []), ...edges] },
 		clones,
 	}
+}
+
+/**
+ * A copy of `group` with `background` set, or removed when empty. `backgroundStyle` is kept only for a background
+ * with a `ratio` or `repeat` style; `cover` is the default and isn't written.
+ */
+export function setBackground<T extends JSONCanvasGroupNode>(group: T, background?: string, style?: 'cover' | 'ratio' | 'repeat'): T {
+	const copy: JSONCanvasGroupNode = { ...group }
+	if (background) copy.background = background
+	else delete copy.background
+	if (background && (style === 'ratio' || style === 'repeat')) copy.backgroundStyle = style
+	else delete copy.backgroundStyle
+	return copy as T
 }

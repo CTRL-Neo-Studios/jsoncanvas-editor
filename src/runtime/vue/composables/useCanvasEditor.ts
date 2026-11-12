@@ -68,6 +68,13 @@ export interface CanvasEditor {
 	preview: (canvas: JSONCanvas) => void
 	/** Makes `canvas` (default: the preview) the document: reported to the parent and recorded for undo. */
 	commit: (canvas?: JSONCanvas) => void
+	/**
+	 * Changes the committed document without an undo step of its own (a card fitting the media it loaded). Skipped
+	 * while a drag previews another.
+	 */
+	amend: (change: (canvas: JSONCanvas) => JSONCanvas) => void
+	/** Width / height that nodes keep when resized, by key: images, video and ratio backgrounds, once loaded. */
+	aspects: Map<string, number>
 	undo: () => void
 	redo: () => void
 	canUndo: Ref<boolean>
@@ -97,6 +104,7 @@ export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: Canvas
 	/** The last committed document; what undo records. Documents are never changed in place. */
 	let committed = canvas.value
 	let pendingPush: ReturnType<typeof setTimeout> | undefined
+	const aspects = new Map<string, number>()
 
 	watch(o.canvas, (value) => {
 		const raw = toRaw(value) // a parent's `ref()` hands over a proxy, which `structuredClone` can't copy
@@ -152,6 +160,15 @@ export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: Canvas
 		syncHistory()
 	}
 
+	function amend(change: (doc: JSONCanvas) => JSONCanvas) {
+		if (canvas.value !== committed) return
+		const doc = change(committed)
+		if (doc === committed) return
+		apply(doc)
+		// A pending push records the amended document anyway.
+		if (pendingPush === undefined) history.replace(doc)
+	}
+
 	const nodeCache = new WeakMap<object, SceneNode>()
 	const edgeCache = new WeakMap<object, SceneEdge>()
 	const scene = computed(() => buildScene(canvas.value, nodeCache, edgeCache))
@@ -203,7 +220,7 @@ export function useCanvasEditor(el: Readonly<Ref<HTMLElement | null>>, o: Canvas
 		preview: (doc) => {
 			canvas.value = doc
 		},
-		commit, undo, redo, zoomToFit, zoomToSelection,
+		commit, amend, aspects, undo, redo, zoomToFit, zoomToSelection,
 	}
 }
 

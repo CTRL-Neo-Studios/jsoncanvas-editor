@@ -15,6 +15,8 @@ const props = defineProps<{
 	/** Around a multi-selection; below the nodes, so they stay clickable. */
 	selectionBox?: BBox
 	labelEditing?: LabelEditing
+	/** The text card being edited. */
+	editing?: string
 	contentHidden: boolean
 	cardLabels: CardLabels
 }>()
@@ -60,6 +62,9 @@ const labelled = computed(() => props.edges.filter(e => e.edge.label || e.key ==
 		:key="n.key"
 		:item="n"
 		:selected="selected.has(n.key)"
+		:focused="selected.size === 1 && selected.has(n.key)"
+		:editing="editing === n.key"
+		:label-editing="labelEditing?.key === n.key ? labelEditing : undefined"
 		:content-hidden="contentHidden"
 		:card-labels="cardLabels"
 	/>
