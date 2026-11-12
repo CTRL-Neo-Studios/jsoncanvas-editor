@@ -6,8 +6,11 @@ import BaseCard from '~/components/BaseCard.vue'
 import demo from '../../../test/fixtures/obsidian-demo.canvas?raw'
 import sample from '../../../test/fixtures/spec-sample.canvas?raw'
 
-/** `count` cards in a grid (every 7th a group around its neighbours' row), each linked to the next. */
-function stress(count: number): JSONCanvas {
+/**
+ * `count` cards in a grid (every 7th a file card), each linked to the next, plus `extra` edges between random pairs
+ * (the same ones every time).
+ */
+function stress(count: number, extra = 0): JSONCanvas {
 	const nodes: JSONCanvas['nodes'] = [], edges: JSONCanvas['edges'] = []
 	const cols = Math.ceil(Math.sqrt(count)), sides: CanvasSide[] = ['right', 'left']
 	for (let i = 0; i < count; i++) {
@@ -17,6 +20,9 @@ function stress(count: number): JSONCanvas {
 			: { id: `n${i}`, type: 'text', text: `Card ${i}\n\nSome **markdown** text.`, x, y, width: 250, height: 120 })
 		if (i) edges.push({ id: `e${i}`, fromNode: `n${i - 1}`, fromSide: sides[0], toNode: `n${i}`, toSide: sides[1], label: i % 10 === 0 ? `edge ${i}` : undefined })
 	}
+	let seed = 1
+	const random = (n: number) => (seed = (seed * 48271) % 2147483647) % n
+	for (let i = 0; i < extra; i++) edges.push({ id: `x${i}`, fromNode: `n${random(count)}`, fromSide: 'bottom', toNode: `n${random(count)}`, toSide: 'top' })
 	return { nodes, edges }
 }
 
@@ -62,6 +68,8 @@ const canvases: Record<string, () => JSONCanvas> = {
 	'Spec sample': () => parseCanvas(sample).canvas,
 	'Unsupported data': () => unsupported,
 	'1,000 nodes': () => stress(1000),
+	// `?canvas=Stress&nodes=5000&edges=20000`
+	'Stress': () => stress(Number(useRoute().query.nodes) || 5000, Number(useRoute().query.edges) || 0),
 }
 const route = useRoute()
 const toast = useToast()
