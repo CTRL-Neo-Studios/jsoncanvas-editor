@@ -6,7 +6,8 @@ const strings = (v: unknown): string[] | undefined => (Array.isArray(v) && v.eve
 /**
  * `host` with every call made safe: a member that throws, rejects or answers with the wrong type is reported to
  * `report` and treated as having nothing to offer (an existing file without a URL, no text, a cancelled picker, no
- * imported files, no links). `readText` and `saveImage` still reject after reporting, so their callers can tell.
+ * imported files, no links). `readText`, `writeText` and `saveImage` still reject after reporting, so their callers
+ * can tell.
  */
 export function guardHost(host: CanvasHost | undefined, report: (e: CanvasError) => void): CanvasHost | undefined {
 	if (!host) return undefined
@@ -28,7 +29,7 @@ export function guardHost(host: CanvasHost | undefined, report: (e: CanvasError)
 		}
 	}
 
-	const { resolveFile, readText, pickFile, importFiles, filesIn, saveImage, listLinks, openFile, openLink } = host
+	const { resolveFile, readText, writeText, pickFile, importFiles, filesIn, saveImage, listLinks, openFile, openLink, openUrl } = host
 	return {
 		...(resolveFile && {
 			resolveFile: path => safe<ResolvedFile>('resolveFile', () => resolveFile(path), v => (typeof v === 'object' && v !== null && typeof (v as ResolvedFile).exists === 'boolean'
@@ -72,6 +73,17 @@ export function guardHost(host: CanvasHost | undefined, report: (e: CanvasError)
 				return safe('filesIn', () => value, strings, [])
 			},
 		}),
+		...(writeText && {
+			async writeText(path, text) {
+				try {
+					await writeText(path, text)
+				}
+				catch (error) {
+					fail('writeText', error)
+					throw error
+				}
+			},
+		}),
 		...(saveImage && {
 			async saveImage(png) {
 				try {
@@ -105,6 +117,16 @@ export function guardHost(host: CanvasHost | undefined, report: (e: CanvasError)
 				}
 				catch (error) {
 					fail('openLink', error)
+				}
+			},
+		}),
+		...(openUrl && {
+			openUrl(url) {
+				try {
+					openUrl(url)
+				}
+				catch (error) {
+					fail('openUrl', error)
 				}
 			},
 		}),

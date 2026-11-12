@@ -17,7 +17,7 @@ const props = defineProps<{
 	selected: boolean
 	/** The only thing selected: its content takes the pointer (links, players, scrolling). */
 	focused: boolean
-	/** A text card being edited. */
+	/** A text, custom or note card being edited. */
 	editing: boolean
 	/** A group whose label is being edited. */
 	labelEditing?: LabelEditing
@@ -159,7 +159,7 @@ onErrorCaptured((error) => {
 				</template>
 			</div>
 			<TextCard v-else-if="item.kind === 'text'" :item="item" :editing="editing" />
-			<FileCard v-else-if="item.kind === 'file'" :item="item" />
+			<FileCard v-else-if="item.kind === 'file'" :item="item" :editing="editing" />
 			<LinkCard v-else :item="item" />
 		</div>
 	</div>

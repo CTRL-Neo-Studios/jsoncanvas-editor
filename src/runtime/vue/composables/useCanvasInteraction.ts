@@ -1,7 +1,7 @@
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { computed, onScopeDispose, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import {
-	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, curveDistance, edgeGeometry, gridSpacing, growBBox, intersectsBBox,
+	boxAtSide, cloneNodes, CONNECT_DISTANCE, containsBBox, curveDistance, edgeGeometry, fileKind, gridSpacing, growBBox, intersectsBBox,
 	lockAxis, MIN_NODE_SIZE, nearestSide, newId, NODE_SIZE, nodeBox, oppositeSide, pointBox, raiseNodes, removeFromCanvas,
 	resizeBox, resizeSnapSource, scaleBoxes, snap, unionBBox,
 	type BBox, type CanvasSide, type EdgeGeometry, type JSONCanvas, type JSONCanvasEdge, type Point,
@@ -74,8 +74,10 @@ export interface CanvasInteraction {
 	labelEditing: ShallowRef<LabelEditing | undefined>
 	/** Ends editing a label with its text; an empty one removes the label. */
 	finishLabel: (key: string, text: string) => void
-	/** The text card being edited. */
+	/** The card being edited (a text card, a custom card, or a note card the host can save). */
 	editing: ShallowRef<string | undefined>
+	/** Whether a card can be edited in place: a text card, a custom card, or a note card the host can save (`writeText`). */
+	canEdit: (item: SceneNode) => boolean
 	startEditing: (key: string) => void
 	/** The editor's text so far; `finishEditing` saves the last one. */
 	draft: (text: string) => void
@@ -84,6 +86,8 @@ export interface CanvasInteraction {
 	editLabel: (key: string, at?: LabelEditing['at']) => void
 	/** Opens what a file or link card shows: the file in the host, the page in a browser tab. */
 	openNode: (item: SceneNode, newTab: boolean) => void
+	/** Opens a web address with `host.openUrl`, or in a new browser tab. */
+	openUrl: (url: string) => void
 	/** Per node key, bumped by "Reload page" so a link card loads again. */
 	reloads: ShallowRef<ReadonlyMap<string, number>>
 	reload: (key: string) => void
@@ -551,10 +555,14 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 			: { ...doc, nodes: doc.nodes!.map(n => (n === item ? next as typeof n : n)) })
 	}
 
+	function canEdit(item: SceneNode) {
+		return item.kind === 'text' || o.customTypes().has(String(item.node.type))
+			|| (item.kind === 'file' && fileKind(item.node.file as string) === 'markdown' && !!o.host()?.writeText)
+	}
+
 	function startEditing(key: string) {
 		const item = scene.value.byKey.get(key)
-		if (o.readonly() || !item || editing.value === key) return
-		if (item.kind !== 'text' && !o.customTypes().has(String(item.node.type))) return
+		if (o.readonly() || !item || editing.value === key || !canEdit(item)) return
 		finishEditing()
 		editor.select([key])
 		draftText = undefined
@@ -574,11 +582,17 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		editor.commit({ ...doc, nodes: doc.nodes!.map(n => (n === item.node ? { ...n, text } : n)) })
 	}
 
+	function openUrl(url: string) {
+		const open = o.host()?.openUrl
+		if (open) open(url)
+		else window.open(url, '_blank', 'noopener,noreferrer')
+	}
+
 	/** Opens what a file or link card shows: the file in the host, the page in a browser tab. */
 	function openNode(item: SceneNode, newTab: boolean) {
 		const n = item.node
 		if (item.kind === 'file') o.host()?.openFile?.(n.file as string, n.subpath as string | undefined, newTab)
-		else if (item.kind === 'link') window.open(n.url as string, '_blank', 'noopener,noreferrer')
+		else if (item.kind === 'link') openUrl(n.url as string)
 	}
 
 	/**
@@ -636,7 +650,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 		}
 		if (target.closest('.jc-group-label')) editLabel(item.key)
 		else if (target.closest('.jc-node-label')) openNode(item, false)
-		else if (item.kind === 'text' || o.customTypes().has(String(item.node.type))) startEditing(item.key)
+		else if (canEdit(item)) startEditing(item.key)
 	}
 
 	function swapFile(key: string) {
@@ -840,7 +854,7 @@ export function useCanvasInteraction(el: Readonly<Ref<HTMLElement | null>>, edit
 
 	return {
 		hovered, handlesFor, selectionBox, marquee, guides, ghosts, connection, labelEditing, finishLabel, menu, closeMenu,
-		editing, startEditing, finishEditing, reloads, reload, swapFile, prompt, editLabel, openNode, dragging, dragNew,
+		editing, canEdit, startEditing, finishEditing, reloads, reload, swapFile, prompt, editLabel, openNode, openUrl, dragging, dragNew,
 		updateNode(key, patch) {
 			const item = scene.value.byKey.get(key)
 			if (!item || o.readonly() || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return

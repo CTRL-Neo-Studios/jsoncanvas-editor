@@ -16,7 +16,7 @@ const props = defineProps<{
 	/** Around a multi-selection; below the nodes, so they stay clickable. */
 	selectionBox?: BBox
 	labelEditing?: LabelEditing
-	/** The text card being edited. */
+	/** The card being edited. */
 	editing?: string
 	contentHidden: boolean
 	cardLabels: CardLabels

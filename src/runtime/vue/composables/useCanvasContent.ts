@@ -1,18 +1,23 @@
 import { shallowRef, type InjectionKey, type ShallowRef, type VNode } from 'vue'
-import type { JSONCanvas, JSONCanvasTextNode } from '../../core'
+import type { JSONCanvas, JSONCanvasFileNode, JSONCanvasTextNode } from '../../core'
 import type { CanvasHost, FileRenderers, NodeRendererProps, NodeRenderers, ResolvedFile } from '../host'
 import type { CanvasMessages } from '../messages'
 import type { CanvasActions, CanvasSettings, CardTemplate } from './useCanvasActions'
 import type { CanvasEditor } from './useCanvasEditor'
 import type { CanvasInteraction } from './useCanvasInteraction'
 
-/** Slots that replace how cards are shown (whole cards by node type, a text card's display and editor) and the chrome. */
+/** Slots that replace how cards are shown (whole cards by node type, a text card's display and editor, a note's editor) and the chrome. */
 export interface CanvasSlots {
 	/** A card for nodes of `type` (`#node-shape`, `#node-file`, ...); takes precedence over `nodeRenderers`. */
 	[slot: `node-${string}`]: ((props: NodeRendererProps) => VNode[]) | undefined
 	'text-display'?: (props: { node: JSONCanvasTextNode, text: string }) => VNode[]
 	/** `update` reports the text as it's typed; `done` ends editing (the last `update` is saved). */
 	'text-editor'?: (props: { node: JSONCanvasTextNode, text: string, update: (text: string) => void, done: () => void }) => VNode[]
+	/**
+	 * A note card's editor (with `host.writeText`): `text` is the note, or the section the card is narrowed to;
+	 * `update` reports the text as it's typed (saved to the note shortly after); `done` ends editing.
+	 */
+	'note-editor'?: (props: { node: JSONCanvasFileNode, path: string, text: string, update: (text: string) => void, done: () => void }) => VNode[]
 	/** Replaces the floating toolbar above the selection. */
 	'toolbar'?: (props: { actions: CanvasActions }) => VNode[]
 	/** Replaces the controls at the right (settings, zoom, undo, export, help). */
@@ -38,6 +43,10 @@ export interface CanvasContent {
 	resolveFile: (path: string) => Promise<ResolvedFile>
 	/** Cached until `refreshFiles`; rejects without `readText`. */
 	readText: (path: string) => Promise<string>
+	/** Saves a note through `host.writeText`; once saved, `readText` answers the new text and cards showing it take it. */
+	writeText: (path: string, text: string) => Promise<void>
+	/** The last note saved by `writeText`. */
+	written: ShallowRef<{ path: string, text: string } | undefined>
 	/** Forgets cached files (all, or those at `paths`), so cards showing them load them again. */
 	refreshFiles: (paths?: string[]) => void
 	/** Bumped by `refreshFiles`; cards watch it to load again. */
@@ -72,6 +81,7 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 	const texts = new Map<string, Promise<string>>()
 	const fileVersion = shallowRef(0)
 	const pending = shallowRef(0)
+	const written = shallowRef<{ path: string, text: string }>()
 
 	/** `load(path)` once per path; a failure isn't kept, so the next card tries again. */
 	function cached<T>(cache: Map<string, Promise<T>>, path: string, load: () => T | Promise<T>): Promise<T> {
@@ -118,6 +128,14 @@ export function useCanvasContent(editor: CanvasEditor, interaction: CanvasIntera
 					if (!read) throw new Error('The host can\'t read files')
 					return read(path)
 				})),
+		async writeText(path, text) {
+			const write = o.host()?.writeText
+			if (!write) throw new Error('The host can\'t write files')
+			await write(path, text)
+			texts.set(path, Promise.resolve(text))
+			written.value = { path, text }
+		},
+		written,
 		refreshFiles(paths) {
 			for (const cache of [files, texts]) {
 				if (!paths) cache.clear()

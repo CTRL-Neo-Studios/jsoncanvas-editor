@@ -165,6 +165,7 @@ Plain props work for the last three as well (`:readonly="true"`).
 | `#node-<type>` | `NodeRendererProps` | A card for nodes of `type` (see [custom cards](#custom-cards)); wins over `nodeRenderers`. |
 | `#text-display` | `{ node, text }` | A text card's content, instead of the Markdown. |
 | `#text-editor` | `{ node, text, update, done }` | A text card's editor, instead of the textarea. `update(text)` as it's typed; `done()` ends editing. |
+| `#note-editor` | `{ node, path, text, update, done }` | A note card's editor (with `host.writeText`), instead of the textarea. `text` is the note, or the heading or block the card is narrowed to; `update(text)` as it's typed; `done()` ends editing. |
 | `#toolbar` | `{ actions }` | Replaces the floating toolbar. |
 | `#controls` | `{ settings, actions, openHelp, openExport }` | Replaces the controls. |
 | `#card-bar` | `{ actions, templates }` | Replaces the bottom bar. |
@@ -197,17 +198,19 @@ Through a template ref (`const editor = useTemplateRef('editor')`):
 |---|---|
 | `resolveFile(path)` → `{ exists, name?, ext?, url? }` | File cards: missing files, and the URL images, video, audio and PDFs load from. Without it, every file counts as existing. |
 | `readText(path)` → `string` | Notes and canvases shown in cards. |
+| `writeText(path, text)` | Saves a note edited in its card. With it, note cards are edited in place: double-click one (or Edit in the toolbar), and what's typed is written to the note shortly after (and when editing ends). A card narrowed to a heading or block edits only that part; the rest of the note is written back unchanged. Note edits change the note, not the canvas, so they aren't undo steps. |
 | `pickFile({ kinds? })` → `path \| undefined` | Add file / Add media, Swap file, a group's background. `kinds`: `'markdown'`, `'image'`, `'video'`, `'audio'`, `'pdf'`, `'canvas'`, `'other'`. |
 | `listLinks(path)` → `{ file, subpath? }[]` | A note's links, offered when an edge from it is dropped on empty canvas. |
 | `openFile(path, subpath, newTab)` | Double-click (or Mod+click) on a card's name; a click on a selected canvas or other file card. |
 | `openLink(target)` | `[[wiki-links]]` clicked in cards. |
+| `openUrl(url)` | Web pages: Open in browser on a link card, and links clicked in Markdown. Without it, `window.open(url, '_blank')`, which a desktop webview (Tauri) may not send to the system browser. |
 | `importFiles(files)` → `paths` | Files pasted or dropped from the OS: store them, return their paths; they become file cards. |
 | `filesIn(data)` → `paths \| undefined` | Your app's own drags and pastes (rows from a file tree): the paths a `DataTransfer` carries. Read `data` before any `await`. |
 | `saveImage(png)` | Saves an image from the Export as image dialog; without it, the dialog isn't offered. |
 
 Paths are whatever your app uses (Obsidian uses vault-relative paths like `Notes/Welcome.md`). Answers are cached per path until `refreshFiles`. Files are only asked for in the browser: during SSR, file cards render empty.
 
-A member that throws, rejects or answers the wrong type emits `error` and counts as having nothing: an existing file without a URL, no file picked, nothing imported, no links. A failed `readText` shows the note as its name; a failed `saveImage` is reported in the export dialog.
+A member that throws, rejects or answers the wrong type emits `error` and counts as having nothing: an existing file without a URL, no file picked, nothing imported, no links. A failed `readText` shows the note as its name; a failed `writeText` leaves the text in the editor; a failed `saveImage` is reported in the export dialog.
 
 ## Custom cards
 
@@ -296,7 +299,7 @@ The stylesheet is plain CSS with `jc-` classes; it uses no Tailwind utilities.
 | **Layout** | `alignRects`, `distributeRects`, `justifyRects`, `arrangeRects`, `resizeBox`, `scaleBoxes`, `snap`, `gridSpacing`, `NODE_SIZE`, `GROUP_PADDING`, `MIN_NODE_SIZE` |
 | **Geometry** | `edgeGeometry` (Obsidian's curves and arrows), `bezierPoint`, `curveDistance`, `nearestSide`, `sideTowards`, `unionBBox`, `growBBox`, `intersectsBBox`, `containsBBox`, `centerOf` |
 | **View** | `fitViewport`, `zoomViewport`, `viewportBBox`, `viewportToWorld`, `clampZoom`, `MIN_ZOOM`, `MAX_ZOOM`, `ZOOM_BREAKPOINT`, `exportSize` |
-| **Content** | `fileKind(path)`, `fileName`, `fileExtension`, `fileLabel`, `markdownSection(text, subpath)` (a heading's section or a block), `embedUrl(url)` (YouTube and X embeds), `canvasMinimap(canvas)` |
+| **Content** | `fileKind(path)`, `fileName`, `fileExtension`, `fileLabel`, `markdownSection(text, subpath)` (a heading's section or a block), `markdownSectionRange(text, subpath)` (where that section is in the text), `embedUrl(url)` (YouTube and X embeds), `canvasMinimap(canvas)` |
 | **Colors** | `PRESET_COLORS`, `isPresetColor`, `normalizeColor`, `parseHexColor`, `isLightColor` |
 | **History** | `CanvasHistory` (snapshots with undo/redo) |
 
@@ -317,6 +320,7 @@ Mod is ⌘ on macOS and Ctrl elsewhere. The canvas's help dialog (the ? control)
 | Resize | Drag an edge or corner; images and video keep their shape |
 | Add a card | Double-click empty canvas; drag from the bottom bar; Mod+drag on empty canvas for a size; right-click for the add menu |
 | Edit a text card | Double-click it; Escape or a click elsewhere saves |
+| Edit a note card | Double-click it (with `host.writeText`); it saves as you type, and Escape or a click elsewhere ends editing |
 | Fit a card to its text | Double-click its bottom or right edge |
 | Connect | Drag from the dot on a card's side; drop on empty canvas to add a card there |
 | Edit an edge's label | Click a selected edge, or right-click it |

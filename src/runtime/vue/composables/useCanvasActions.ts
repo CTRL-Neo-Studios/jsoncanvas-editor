@@ -417,7 +417,7 @@ export function useCanvasActions(editor: CanvasEditor, interaction: CanvasIntera
 				if (hasBackground) items.push({ id: 'background', label: m.editBackground, icon: 'i-lucide-image', children: backgroundItems(p) })
 				else if (o.host()?.pickFile) items.push({ id: 'background', label: m.setBackground, icon: 'i-lucide-image', onSelect: () => void o.host()!.pickFile!({ kinds: ['image'] }).then(path => path && commitNodes(new Map([[p.node, setBackground(node, path)]]))) })
 			}
-			else if (p.kind === 'text' || o.customTypes().has(String(p.node.type))) {
+			else if (interaction.canEdit(p)) {
 				items.push({ id: 'edit', label: m.edit, icon: 'i-lucide-pencil', onSelect: () => interaction.startEditing(p.key) })
 			}
 			return items

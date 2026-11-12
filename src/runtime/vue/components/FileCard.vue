@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { computed, inject, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 import UIcon from '@nuxt/ui/components/Icon.vue'
-import { canvasMinimap, fileExtension, fileKind, fileName, markdownSection, parseCanvas, type JSONCanvasFileNode } from '../../core'
+import { canvasMinimap, fileExtension, fileKind, fileName, markdownSection, markdownSectionRange, parseCanvas, type JSONCanvasFileNode } from '../../core'
 import { CANVAS_CONTENT } from '../composables/useCanvasContent'
 import type { SceneNode } from '../composables/useCanvasEditor'
 import type { ResolvedFile } from '../host'
 import { format } from '../messages'
+import { focusCanvas } from '../utils/inline-edit'
+import { SlotRender } from '../utils/slot-render'
 import CanvasMinimap from './CanvasMinimap.vue'
 import MarkdownView from './MarkdownView.vue'
 
-/** A file card, drawn by the file's kind (or the host's renderer for its extension). */
-const props = defineProps<{ item: SceneNode }>()
+/** A file card, drawn by the file's kind (or the host's renderer for its extension); a note can be edited in place. */
+const props = defineProps<{
+	item: SceneNode
+	editing: boolean
+}>()
 const content = inject(CANVAS_CONTENT)!
-const { interaction } = content
+const { slots, interaction } = content
 const node = computed(() => props.item.node as JSONCanvasFileNode)
 
 const file = shallowRef<ResolvedFile>()
-/** A note's or canvas's text, once read; `null` when it couldn't be. */
+/** A note's or canvas's text, once read; `null` when it couldn't be, or isn't read (other files, `fileRenderers`). */
 const text = shallowRef<string | null>()
 
 const ext = computed(() => file.value?.ext ?? fileExtension(node.value.file))
@@ -35,10 +40,15 @@ async function load(path: string) {
 	const resolved = await content.resolveFile(path).catch((): ResolvedFile => ({ exists: true }))
 	if (path !== node.value.file) return
 	file.value = resolved
-	if (!resolved.exists || renderer.value || !['markdown', 'canvas'].includes(kind.value)) return
+	if (!resolved.exists || renderer.value || !['markdown', 'canvas'].includes(kind.value)) return void (text.value = null)
 	const read = await content.readText(path).catch(() => null)
 	if (path === node.value.file) text.value = read
 }
+
+// Another card saved the note: show what it saved.
+watch(content.written, (w) => {
+	if (w?.path === node.value.file && typeof text.value === 'string') text.value = w.text
+})
 
 /** What a note card shows: the note, or the heading or block it's narrowed to. */
 const section = computed(() => (typeof text.value === 'string' ? markdownSection(text.value, node.value.subpath ?? '') : undefined))
@@ -59,10 +69,78 @@ const audio = useTemplateRef<HTMLAudioElement>('audio')
 watch(audio, (el) => {
 	if (el) content.setHeight(props.item.key, (el.offsetHeight || 42) + 2)
 }, { flush: 'post' })
+
+/** While editing: the note as it was when editing started, the card's section of it, and that section's text. */
+const edit = shallowRef<{ path: string, note: string, from: number, to: number, text: string }>()
+/** Typed since the last save. */
+let typed: string | undefined
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+let saving = Promise.resolve()
+
+const editor = useTemplateRef<HTMLDivElement>('editor')
+const textarea = useTemplateRef<HTMLTextAreaElement>('textarea')
+watch(textarea, (el) => {
+	if (!el) return
+	el.focus({ preventScroll: true })
+	el.setSelectionRange(el.value.length, el.value.length)
+}, { flush: 'post' })
+
+watch([() => props.editing, text], ([on, note]) => {
+	if (!on) {
+		save()
+		edit.value = undefined
+		return
+	}
+	if (edit.value || note === undefined) return
+	const range = typeof note === 'string' && kind.value === 'markdown' ? markdownSectionRange(note, node.value.subpath ?? '') : undefined
+	// Missing, unreadable, or narrowed to a heading or block the note lacks: nothing to edit.
+	if (!range) return done()
+	edit.value = { path: node.value.file, note, ...range, text: note.slice(range.from, range.to) }
+}, { immediate: true })
+
+function update(value: string) {
+	typed = value
+	clearTimeout(saveTimer)
+	saveTimer = setTimeout(save, 300)
+}
+
+/** Writes the note with what's typed in place of the section; one write at a time, in order. */
+function save() {
+	clearTimeout(saveTimer)
+	const e = edit.value
+	if (!e || typed === undefined) return
+	const note = e.note.slice(0, e.from) + typed + e.note.slice(e.to)
+	typed = undefined
+	// A failed write is reported by the host guard (the `error` event); the editor keeps the text.
+	saving = saving.then(() => content.writeText(e.path, note)).catch(() => {})
+	void content.track(saving)
+}
+onBeforeUnmount(save)
+
+/** Ends editing, giving the keyboard back to the canvas. */
+function done() {
+	if (editor.value) focusCanvas(editor.value)
+	interaction.finishEditing()
+}
 </script>
 
 <template>
-	<div v-if="!file" class="jc-node-content" />
+	<div v-if="edit" ref="editor" class="jc-node-content jc-text jc-editing">
+		<SlotRender
+			v-if="slots['note-editor']"
+			:render="slots['note-editor']"
+			:props="{ node, path: edit.path, text: edit.text, update, done }"
+		/>
+		<textarea
+			v-else
+			ref="textarea"
+			class="jc-text-editor"
+			:value="edit.text"
+			@input="update(($event.target as HTMLTextAreaElement).value)"
+			@keydown.escape="done"
+		/>
+	</div>
+	<div v-else-if="!file" class="jc-node-content" />
 	<div v-else-if="!file.exists" class="jc-node-content jc-missing jc-interactive">
 		<p>
 			<UIcon name="i-lucide-triangle-alert" class="jc-icon" />
