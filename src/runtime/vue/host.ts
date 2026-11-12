@@ -24,6 +24,8 @@ export interface CanvasHost {
 	resolveFile?: (path: string) => ResolvedFile | Promise<ResolvedFile>
 	/** A text file's contents: notes and canvases shown in cards. */
 	readText?: (path: string) => string | Promise<string>
+	/** Saves a note's new text. With it, note cards are edited in place (double-click, or Edit in the toolbar). */
+	writeText?: (path: string, text: string) => void | Promise<void>
 	/** Lets the user choose a file (of `kinds`, if given); resolves to its path, or `undefined` when cancelled. */
 	pickFile?: (options?: { kinds?: FileKind[] }) => Promise<string | undefined>
 	/** Stores files dropped or pasted onto the canvas; resolves to their paths. */
@@ -41,6 +43,8 @@ export interface CanvasHost {
 	openFile?: (path: string, subpath: string | undefined, newTab: boolean) => void
 	/** Follows a wiki-link (`[[target]]`) from a card. */
 	openLink?: (target: string) => void
+	/** Opens a web address outside the app; without it, `window.open(url, '_blank')`. */
+	openUrl?: (url: string) => void
 }
 
 /** A host call that failed (threw, rejected, or answered with the wrong type); the canvas carried on without it. */

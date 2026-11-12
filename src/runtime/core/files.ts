@@ -56,7 +56,10 @@ function headings(lines: string[]): Array<{ level: number, text: string } | unde
 	})
 }
 
-function headingSection(lines: string[], path: string[]): string | undefined {
+/** Where a section lies in `lines`: its first and last line, and how much of the last line it takes. */
+type Lines = [start: number, end: number, endLength: number]
+
+function headingSection(lines: string[], path: string[]): Lines | undefined {
 	const levels = headings(lines)
 	let start = -1, end = lines.length
 	for (const part of path) {
@@ -67,11 +70,11 @@ function headingSection(lines: string[], path: string[]): string | undefined {
 		const next = levels.findIndex((h, i) => i > start && i < end && h !== undefined && h.level <= level)
 		if (next >= 0) end = next
 	}
-	return lines.slice(start, end).join('\n')
+	return [start, end - 1, lines[end - 1]!.length]
 }
 
 // ponytail: blocks are runs of non-blank lines, so a fenced block with blank lines inside isn't one block.
-function blockSection(lines: string[], id: string): string | undefined {
+function blockSection(lines: string[], id: string): Lines | undefined {
 	const marker = `^${id}`
 	const single = (line: string) => !line.trim() || LIST_ITEM.test(line) || HEADING.test(line)
 	for (const [i, raw] of lines.entries()) {
@@ -86,10 +89,29 @@ function blockSection(lines: string[], id: string): string | undefined {
 		else if (!line.endsWith(` ${marker}`)) continue
 		let start = end
 		while (start > 0 && !single(lines[start]!) && !single(lines[start - 1]!)) start--
-		const block = lines.slice(start, end + 1)
-		if (end === i) block[block.length - 1] = line.slice(0, -marker.length).trimEnd()
-		return block.join('\n')
+		// Without the id ending its last line.
+		return [start, end, end === i ? line.slice(0, -marker.length).trimEnd().length : lines[end]!.length]
 	}
+}
+
+/**
+ * Where `markdownSection(text, subpath)` lies in `text` (character offsets, `to` exclusive), so an edited section can
+ * be put back; `undefined` when there's no such heading or block.
+ */
+export function markdownSectionRange(text: string, subpath: string): { from: number, to: number } | undefined {
+	if (subpath === '' || subpath === '#') return { from: 0, to: text.length }
+	const lines = text.split(/\r?\n/)
+	let first = 0
+	if (lines[0]?.trimEnd() === '---') {
+		const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---')
+		if (end > 0) first = end + 1
+	}
+	const body = lines.slice(first), path = subpath.slice(1)
+	const found = path.startsWith('^') ? blockSection(body, path.slice(1)) : headingSection(body, path.split('#'))
+	if (!found) return undefined
+	const starts = [0]
+	for (const m of text.matchAll(/\n/g)) starts.push(m.index + 1)
+	return { from: starts[first + found[0]]!, to: starts[first + found[1]]! + found[2] }
 }
 
 /**
@@ -99,11 +121,6 @@ function blockSection(lines: string[], id: string): string | undefined {
  */
 export function markdownSection(text: string, subpath: string): string | undefined {
 	if (subpath === '' || subpath === '#') return text
-	let lines = text.split(/\r?\n/)
-	if (lines[0]?.trimEnd() === '---') {
-		const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---')
-		if (end > 0) lines = lines.slice(end + 1)
-	}
-	const path = subpath.slice(1)
-	return path.startsWith('^') ? blockSection(lines, path.slice(1)) : headingSection(lines, path.split('#'))
+	const range = markdownSectionRange(text, subpath)
+	return range && text.slice(range.from, range.to).replace(/\r\n/g, '\n')
 }
