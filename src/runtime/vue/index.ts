@@ -1,1 +1,3 @@
-export { default as JsonCanvasEditor } from './components/JsonCanvasEditor.vue'
+export { default as JsonCanvas } from './components/JsonCanvas.vue'
+export type { CardLabels } from './composables/useCanvasEditor'
+export type { WheelBehavior } from './composables/useViewport'

@@ -3,7 +3,7 @@ Get your module up and running quickly.
 
 Find and replace all on all files (CMD+SHIFT+F):
 - Name: JSON Canvas Editor for Nuxt
-- Package name: @type32/jsoncanvas-editor-nuxt
+- Package name: @type32/jsoncanvas-editor
 - Description: A component that allows you to input and edit a JSON Canvas.
 -->
 
@@ -21,11 +21,11 @@ A component that allows you to input and edit a JSON Canvas.
 Install the module to your Nuxt application with one command:
 
 ```bash
-bunx nuxi module add @type32/jsoncanvas-editor-nuxt
+bunx nuxi module add @type32/jsoncanvas-editor
 ```
 or
 ```bash
-bun add @type32/jsoncanvas-editor-nuxt
+bun add @type32/jsoncanvas-editor
 ```
 
 That's it! You can now use JSON Canvas Editor in your Nuxt app ✨
@@ -35,39 +35,42 @@ That's it! You can now use JSON Canvas Editor in your Nuxt app ✨
 
 ### Usage (Nuxt)
 
-Add `@nuxt/ui` and this module to `nuxt.config.ts`; `<JsonCanvasEditor>` is registered globally:
+Add `@nuxt/ui` and this module to `nuxt.config.ts`; `<JsonCanvas>` is registered globally. It fills its parent:
 
 ```vue
 <template>
   <div class="h-dvh">
-    <JsonCanvasEditor v-model="canvas" />
+    <JsonCanvas v-model="canvas" v-model:viewport="viewport" />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { JSONCanvas } from '@type32/jsoncanvas-editor-nuxt/core'
-const canvas = ref<JSONCanvas>({ nodes: [], edges: [] })
+import { parseCanvas, type JSONCanvas, type Viewport } from '@type32/jsoncanvas-editor/core'
+const canvas = shallowRef<JSONCanvas>(parseCanvas(fileText).canvas)
+const viewport = ref<Viewport>() // optional; without one the view fits the canvas
 </script>
 ```
+
+Props: `wheelBehavior` (`'pan'` or `'zoom'`), `cardLabels` (`'always'`, `'hover'` or `'never'`), `zoomBreakpoint`. The component ref exposes `canvas`, `issues`, `viewport`, `zoomToFit()`, `zoomToBBox()`, `zoomBy()`, `setViewport()` and `screenToWorld()`.
 
 ### Usage (Vue + Vite)
 
 Set up [Nuxt UI for Vue](https://ui.nuxt.com/docs/getting-started/installation/vue), then:
 
 ```ts
-import { JsonCanvasEditor } from '@type32/jsoncanvas-editor-nuxt/vue'
-import '@type32/jsoncanvas-editor-nuxt/style.css'
+import { JsonCanvas } from '@type32/jsoncanvas-editor/vue'
+import '@type32/jsoncanvas-editor/style.css'
 ```
 
-Entry points: `@type32/jsoncanvas-editor-nuxt/core` (types, no Vue), `/vue` (components), `/style.css`.
+Entry points: `@type32/jsoncanvas-editor/core` (read, write and lay out canvases; no Vue), `/vue` (components), `/style.css`. Theme it with the `--jc-*` CSS variables on `.jc-canvas`.
 
-Until the components move to the library's plain CSS, add the package to Tailwind's sources in your main CSS: `@source "../node_modules/@type32/jsoncanvas-editor-nuxt/dist";` (path relative to that file).
+The editor currently:
 
-The editor currently supports:
+- Reads and writes JSON Canvas files as Obsidian does, keeping data it doesn't understand (listed in `issues`; unknown nodes show as placeholders)
+- Draws text, file, link and group nodes and edges with arrows, labels and colors, at Obsidian's geometry
+- Pans (wheel, Space+drag, middle or right drag) and zooms (Ctrl/Cmd+wheel, pinch), with card content replaced by placeholders when zoomed far out
 
-- Pan (wheel, middle mouse, Space+drag) and zoom (Ctrl/Cmd+wheel)
-- Rendering text/file/link/group nodes (no edges yet)
-- Box and Shift/Cmd selection; drag to move (group contents move with the group); resize from the edges; optional grid snap
+Editing (selection, moving, resizing, connecting) comes next.
 
 Inspiration and reference implementations for rendering-only solutions:
 

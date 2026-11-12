@@ -1,0 +1,21 @@
+{
+	"nodes":[
+		{"id":"823c7c7b91725572","type":"group","x":520,"y":780,"width":1300,"height":560,"label":"Untitled group"},
+		{"id":"7726edf0147a0559","type":"file","file":"29d4c6508c683ac70fef421fec786d48.jpg","x":-55,"y":114,"width":321,"height":400},
+		{"id":"253ed2af7f3f9c0c","type":"file","file":"Welcome.md","x":680,"y":20,"width":400,"height":400},
+		{"id":"4e059a156f597cc3","type":"file","file":"Random Rambling.md","x":676,"y":828,"width":400,"height":400},
+		{"id":"1ec50fd483b6c811","type":"file","file":"Rambling 2.md","x":1200,"y":828,"width":400,"height":400},
+		{"id":"3d870dd094bd1edf","type":"text","text":"non note block","x":1265,"y":630,"width":250,"height":60},
+		{"id":"641e05189aafc286","type":"text","text":"custom colors","x":1600,"y":570,"width":250,"height":60,"color":"3"},
+		{"id":"0776a52e13de5a1c","type":"text","text":"","x":1247,"y":545,"width":250,"height":60},
+		{"id":"1ad8a7f4f19f972c","type":"file","file":"Pasted image 20261111150745.png","x":1225,"y":112,"width":400,"height":297},
+		{"id":"581df43ea76a24be","x":106,"y":-520,"width":917,"height":400,"type":"file","file":"Untitled.base"},
+		{"id":"842924351453b9f5","type":"file","file":"Pasted image 20261111150825.png","x":-1160,"y":-155,"width":1024,"height":669},
+		{"id":"2cff22ee8ac30613","type":"file","file":"Untitled.canvas","x":-1094,"y":599,"width":981,"height":726}
+	],
+	"edges":[
+		{"id":"d327989f1c48226c","fromNode":"7726edf0147a0559","fromSide":"right","toNode":"253ed2af7f3f9c0c","toSide":"left"},
+		{"id":"be476750dcee4b8b","fromNode":"823c7c7b91725572","fromSide":"top","toNode":"253ed2af7f3f9c0c","toSide":"bottom"},
+		{"id":"e668277bc46ffc58","fromNode":"823c7c7b91725572","fromSide":"left","toNode":"2cff22ee8ac30613","toSide":"right"}
+	]
+}
